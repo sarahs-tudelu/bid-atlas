@@ -1,0 +1,62 @@
+export interface StateSourceRegistryRecord {
+  code: string;
+  name: string;
+  procurementUrl: string;
+  transportationUrl: string;
+}
+
+// Official state/DC starting points. Each is a discovery root, not proof that
+// every authority, university, local government, or transportation notice is covered.
+export const STATE_SOURCE_REGISTRY: StateSourceRegistryRecord[] = [
+  { code: "AL", name: "Alabama", procurementUrl: "https://procurement.staars.alabama.gov/", transportationUrl: "https://www.dot.state.al.us/programs/Construction/bidding.html" },
+  { code: "AK", name: "Alaska", procurementUrl: "https://doa.alaska.gov/dof/iris/vendor.html", transportationUrl: "https://dot.alaska.gov/procurement/" },
+  { code: "AZ", name: "Arizona", procurementUrl: "https://spo.az.gov/contracts/upcoming-bids", transportationUrl: "https://azdot.gov/business/contracts-and-specifications/current-advertisements" },
+  { code: "AR", name: "Arkansas", procurementUrl: "https://www.transform.ar.gov/procurement/", transportationUrl: "https://ardot.gov/divisions/program-management/construction-contract-development/" },
+  { code: "CA", name: "California", procurementUrl: "https://www.dgs.ca.gov/PD/Resources/Page-Content/Procurement-Division-Resources-List-Folder/Cal-eProcure-Portal-to-Access-Bid-Opportunities", transportationUrl: "https://ccop.dot.ca.gov/allProjects" },
+  { code: "CO", name: "Colorado", procurementUrl: "https://co.colorado.gov/bid-work-state", transportationUrl: "https://www.codot.gov/business/bidding" },
+  { code: "CT", name: "Connecticut", procurementUrl: "https://portal.ct.gov/das/ctsource/bidboard", transportationUrl: "https://portal.ct.gov/dot/contracting" },
+  { code: "DE", name: "Delaware", procurementUrl: "https://bids.delaware.gov/", transportationUrl: "https://deldot.gov/Business/bids/index.shtml" },
+  { code: "DC", name: "District of Columbia", procurementUrl: "https://ocp.dc.gov/service/ocp-solicitations", transportationUrl: "https://ddot.dc.gov/page/doing-business-ddot" },
+  { code: "FL", name: "Florida", procurementUrl: "https://vendor.myfloridamarketplace.com/search/bids", transportationUrl: "https://www.fdot.gov/contracts/" },
+  { code: "GA", name: "Georgia", procurementUrl: "https://fscm.teamworks.georgia.gov/psp/supp/SUPPLIER/ERP/c/SCP_PUBLIC_MENU_FL.SCP_PUB_BID_CMP_FL.GBL", transportationUrl: "https://www.dot.ga.gov/GDOT/Pages/Contractors.aspx" },
+  { code: "HI", name: "Hawaii", procurementUrl: "https://hiepro.ehawaii.gov/", transportationUrl: "https://hidot.hawaii.gov/highways/doing-business/contractors/" },
+  { code: "ID", name: "Idaho", procurementUrl: "https://purchasing.idaho.gov/", transportationUrl: "https://itd.idaho.gov/business/" },
+  { code: "IL", name: "Illinois", procurementUrl: "https://www.bidbuy.illinois.gov/bso/view/search/external/advancedSearchBid.xhtml?openBids=true", transportationUrl: "https://idot.illinois.gov/doing-business/procurements/letting-and-bidding/index" },
+  { code: "IN", name: "Indiana", procurementUrl: "https://www.in.gov/idoa/procurement/current-business-opportunities/", transportationUrl: "https://www.in.gov/indot/doing-business-with-indot/contractors-construction/letting-information/" },
+  { code: "IA", name: "Iowa", procurementUrl: "https://bidopportunities.iowa.gov/", transportationUrl: "https://iowadot.gov/contracts/bid-lettings" },
+  { code: "KS", name: "Kansas", procurementUrl: "https://admin.ks.gov/offices/procurement-and-contracts", transportationUrl: "https://www.ksdot.gov/bureaus/burconsmain/lettinginfo.asp" },
+  { code: "KY", name: "Kentucky", procurementUrl: "https://vss.ky.gov/", transportationUrl: "https://transportation.ky.gov/Construction-Procurement/Pages/default.aspx" },
+  { code: "LA", name: "Louisiana", procurementUrl: "https://www.doa.la.gov/doa/osp/vendor-resources/contracting-opportunities/", transportationUrl: "https://www.dotd.la.gov/business/contractors-bidders/" },
+  { code: "ME", name: "Maine", procurementUrl: "https://www.maine.gov/dafs/bbm/procurementservices/vendors/vendor-self-service-system", transportationUrl: "https://www1.maine.gov/dot/doing-business/bid-opportunities" },
+  { code: "MD", name: "Maryland", procurementUrl: "https://emma.maryland.gov/", transportationUrl: "https://roads.maryland.gov/mdotsha/pages/Index.aspx?PageId=851" },
+  { code: "MA", name: "Massachusetts", procurementUrl: "https://www.mass.gov/how-to/search-for-procurements-in-commbuys", transportationUrl: "https://www.mass.gov/massdot-contract-opportunities" },
+  { code: "MI", name: "Michigan", procurementUrl: "https://www.michigan.gov/dtmb/procurement/contractconnect/how-to-register", transportationUrl: "https://www.michigan.gov/mdot/business/construction/bid-letting" },
+  { code: "MN", name: "Minnesota", procurementUrl: "https://mn.gov/mmb/accounting/swift/vendor-resources/", transportationUrl: "https://www.dot.state.mn.us/bidlet/" },
+  { code: "MS", name: "Mississippi", procurementUrl: "https://www.dfa.ms.gov/vendors", transportationUrl: "https://mdot.ms.gov/portal/construction" },
+  { code: "MO", name: "Missouri", procurementUrl: "https://missouribuys.mo.gov/bid-board", transportationUrl: "https://www.modot.org/bidding-letting-information" },
+  { code: "MT", name: "Montana", procurementUrl: "https://spb.mt.gov/Vendors", transportationUrl: "https://www.mdt.mt.gov/business/contracting/" },
+  { code: "NE", name: "Nebraska", procurementUrl: "https://das.nebraska.gov/materiel/bid-opportunities.html", transportationUrl: "https://dot.nebraska.gov/business-center/business-opp/hwy-bridge-lp/" },
+  { code: "NV", name: "Nevada", procurementUrl: "https://purchasing.nv.gov/vendors/", transportationUrl: "https://www.dot.nv.gov/doing-business/about-ndot/divisions/engineering/contract-services" },
+  { code: "NH", name: "New Hampshire", procurementUrl: "https://das.nh.gov/purchasing/", transportationUrl: "https://www.dot.nh.gov/doing-business-nhdot/bidding-contracts" },
+  { code: "NJ", name: "New Jersey", procurementUrl: "https://www.nj.gov/treasury/purchase/vendor.shtml", transportationUrl: "https://www.nj.gov/transportation/business/procurement/ConstrServ/" },
+  { code: "NM", name: "New Mexico", procurementUrl: "https://generalservices.state.nm.us/state-purchasing/active-itbs-and-rfps/active-procurements/", transportationUrl: "https://www.dot.nm.gov/contractors/" },
+  { code: "NY", name: "New York", procurementUrl: "https://www.nyscr.ny.gov/home/contracts", transportationUrl: "https://www.dot.ny.gov/doing-business/opportunities/const-highway" },
+  { code: "NC", name: "North Carolina", procurementUrl: "https://evp.nc.gov/", transportationUrl: "https://connect.ncdot.gov/letting/Pages/default.aspx" },
+  { code: "ND", name: "North Dakota", procurementUrl: "https://www.omb.nd.gov/doing-business-state/procurement/ndbuys", transportationUrl: "https://www.dot.nd.gov/business/bid-opportunities/construction-contracting" },
+  { code: "OH", name: "Ohio", procurementUrl: "https://ohiobuys.ohio.gov/", transportationUrl: "https://www.transportation.ohio.gov/working/contracts" },
+  { code: "OK", name: "Oklahoma", procurementUrl: "https://oklahoma.gov/omes/divisions/central-purchasing/solicitations.html", transportationUrl: "https://oklahoma.gov/odot/business-center/bidding-contracting.html" },
+  { code: "OR", name: "Oregon", procurementUrl: "https://www.oregon.gov/das/ORBuys/Pages/index.aspx", transportationUrl: "https://www.oregon.gov/odot/Business/Procurement/Pages/eBids.aspx" },
+  { code: "PA", name: "Pennsylvania", procurementUrl: "https://www.emarketplace.state.pa.us/Search.aspx", transportationUrl: "https://www.ecms.penndot.gov/ECMS/" },
+  { code: "RI", name: "Rhode Island", procurementUrl: "https://ridop.ri.gov/ocean-state-procures-osp", transportationUrl: "https://www.dot.ri.gov/contracting/" },
+  { code: "SC", name: "South Carolina", procurementUrl: "https://scbo.sc.gov/", transportationUrl: "https://www.scdot.org/business/contractor.aspx" },
+  { code: "SD", name: "South Dakota", procurementUrl: "https://www.sd.gov/bhra?id=cs_kb_article_view&sysparm_article=KB0044779", transportationUrl: "https://dot.sd.gov/doing-business/contractors/bid-letting-information" },
+  { code: "TN", name: "Tennessee", procurementUrl: "https://www.tn.gov/generalservices/procurement/central-procurement-office--cpo-/supplier-information.html", transportationUrl: "https://www.tn.gov/tdot/business-redirect/contractors-redirect/construction-division/bid-letting.html" },
+  { code: "TX", name: "Texas", procurementUrl: "https://www.txsmartbuy.gov/esbd", transportationUrl: "https://www.txdot.gov/business/road-bridge-maintenance/contract-letting.html" },
+  { code: "UT", name: "Utah", procurementUrl: "https://purchasing.utah.gov/", transportationUrl: "https://www.udot.utah.gov/connect/business/contracting/advertised-projects/" },
+  { code: "VT", name: "Vermont", procurementUrl: "https://www.vermontbusinessregistry.com/BidSearch.aspx?type=1", transportationUrl: "https://vtrans.vermont.gov/contract-admin/bids-requests" },
+  { code: "VA", name: "Virginia", procurementUrl: "https://eva.virginia.gov/", transportationUrl: "https://www.vdot.virginia.gov/doing-business/technical-guidance-and-support/construction/advertisement/" },
+  { code: "WA", name: "Washington", procurementUrl: "https://des.wa.gov/sell/how-work-state/register-bid-opportunities", transportationUrl: "https://wsdot.wa.gov/business-wsdot/contracting-opportunities" },
+  { code: "WV", name: "West Virginia", procurementUrl: "https://prd311.wvoasis.gov/PRDVSS1X1/Advantage4", transportationUrl: "https://transportation.wv.gov/highways/contractadmin/letting/Pages/default.aspx" },
+  { code: "WI", name: "Wisconsin", procurementUrl: "https://esupplier.wi.gov/psc/esupplier_4/SUPPLIER/ERP/c/WI_SS_SELF_SERVICE.WI_SS_BIDDER_BIDS.GBL", transportationUrl: "https://wisconsindot.gov/Pages/doing-bus/contractors/hcci/bid-let.aspx" },
+  { code: "WY", name: "Wyoming", procurementUrl: "https://ai.wyo.gov/divisions/general-services/purchasing/bid-opportunities", transportationUrl: "https://www.dot.state.wy.us/home/business_with_wydot/contractors/letting_schedules.html" },
+];

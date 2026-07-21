@@ -1,0 +1,47 @@
+{
+  "name": "bidatlas",
+  "version": "0.1.0",
+  "private": true,
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "scripts": {
+    "dev": "vinext dev",
+    "build": "vinext build",
+    "start": "node scripts/start-vinext.mjs",
+    "test": "npm run build && node --test tests/dashboard.test.mjs tests/documents-workspace.test.mjs tests/socrata-city-connectors.test.mjs tests/standardized-source-connectors.test.mjs tests/sam-opportunities.test.mjs tests/project-sector.test.mjs tests/outreach-intelligence.test.mjs tests/plan-contact-extraction.test.mjs tests/ingestion-safety.test.mjs tests/ingestion-pagination.test.mjs tests/portal-classification.test.mjs tests/project-document-ingestion.test.mjs tests/project-drawings.test.mjs tests/bid-draft-persistence.test.mjs tests/project-research.test.mjs tests/integration-credentials.test.mjs tests/bid-readiness.test.mjs tests/public-dot-connectors.test.mjs tests/texas-dot-connector.test.mjs tests/ohio-dot-connector.test.mjs tests/pennsylvania-dot-connector.test.mjs tests/public-dot-research.test.mjs tests/scheduled-refresh.test.mjs tests/source-monitor.test.mjs",
+    "lint": "eslint . --ignore-pattern dist --ignore-pattern .next --ignore-pattern work",
+    "db:generate": "drizzle-kit generate",
+    "db:validate": "node --experimental-sqlite scripts/validate-migrations.mjs",
+    "db:local-bootstrap": "node --experimental-sqlite scripts/bootstrap-local-d1.mjs --with-census",
+    "cities:audit": "node scripts/import-city-seeds.mjs",
+    "sources:classify": "node scripts/enrich-jurisdiction-source-seeds.mjs",
+    "registry:inspect": "node scripts/import-census-jurisdictions.mjs --inspect"
+  },
+  "dependencies": {
+    "drizzle-orm": "0.45.2",
+    "fflate": "^0.8.2",
+    "next": "16.2.6",
+    "react": "19.2.6",
+    "react-dom": "19.2.6"
+  },
+  "devDependencies": {
+    "@cloudflare/vite-plugin": "1.37.1",
+    "@tailwindcss/postcss": "4.2.1",
+    "@types/node": "22.19.19",
+    "@types/react": "19.2.14",
+    "@types/react-dom": "19.2.3",
+    "@vitejs/plugin-react": "6.0.2",
+    "@vitejs/plugin-rsc": "0.5.26",
+    "drizzle-kit": "0.31.10",
+    "eslint": "9.39.4",
+    "eslint-config-next": "16.2.6",
+    "react-server-dom-webpack": "19.2.6",
+    "tailwindcss": "4.2.1",
+    "typescript": "5.9.3",
+    "vinext": "0.0.50",
+    "vite": "8.0.13",
+    "wrangler": "4.92.0"
+  },
+  "type": "module"
+}

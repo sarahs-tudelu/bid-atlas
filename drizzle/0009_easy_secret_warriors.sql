@@ -1,0 +1,1 @@
+ALTER TABLE `jurisdiction_metrics` ADD `unclassified_projects` integer DEFAULT 0 NOT NULL;

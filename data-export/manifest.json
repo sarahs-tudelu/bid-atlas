@@ -1,0 +1,33 @@
+{
+  "sourceCommit": "ee08c1d92923d494347dde9655e8fe344af4a585",
+  "createdAt": "2026-07-21T20:08:53.525Z",
+  "liveProjectSnapshot": {
+    "file": "current-projects.json",
+    "projects": 794,
+    "sourceStatusEntries": 30
+  },
+  "database": {
+    "relativePath": ".wrangler/state/v3/d1/miniflare-D1DatabaseObject/faaf2b0445ab934c3aac48ddf0cdfade8f9bac050be98993748742cdd2cb05fb.sqlite",
+    "bytes": 94416896,
+    "sha256": "DFE4734F73D58F779EE706D06DB962016F012CC60EB0320C3D6D013510556030",
+    "integrity": "ok",
+    "foreignKeyViolations": 0,
+    "projects": 9,
+    "researchFindings": 134,
+    "documents": 0,
+    "documentBlobs": 0,
+    "integrationCredentials": 0
+  },
+  "censusSeed": {
+    "relativePath": "outputs/census-jurisdictions.sql",
+    "bytes": 33673970,
+    "sha256": "D319F9AB2CC3540167E808465C52FFCCF30E44127C593FA717651EE7F3FF523A",
+    "jurisdictions": 97241
+  },
+  "r2Objects": 0,
+  "notes": [
+    "Live connector rows normally refresh from official public sources and are not all persisted in D1.",
+    "The included current-projects.json is the explicit snapshot exported for this transfer.",
+    "The included .env is sensitive and must not be committed or shared publicly."
+  ]
+}
