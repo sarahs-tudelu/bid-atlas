@@ -1,4 +1,5 @@
 import { sha256Hex } from "../project-documents/contracts";
+import { ensureDocumentMetadataIndex } from "../project-documents/metadata-index";
 import {
   SourceMonitorInputError,
   assessPostingReadiness,
@@ -334,6 +335,7 @@ async function materializeCandidate(
   verifiedBy: string,
   now: Date,
 ): Promise<string> {
+  await ensureDocumentMetadataIndex(db);
   const reasons = assessPostingReadiness(candidate, now);
   if (reasons.length > 0) {
     throw new SourceMonitorInputError(

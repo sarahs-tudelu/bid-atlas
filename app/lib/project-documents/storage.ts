@@ -4,6 +4,7 @@ import {
   type DocumentMetadataInput,
   type DocumentPayloadClassification,
 } from "./contracts.ts";
+import { ensureDocumentMetadataIndex } from "./metadata-index.ts";
 
 export class DocumentStorageError extends Error {
   readonly status: number;
@@ -345,6 +346,7 @@ export async function persistProjectDocument(
   providedBindings?: DocumentStorageBindings,
 ): Promise<PersistedDocument> {
   const { db, bucket } = providedBindings ?? await getBindings(Boolean(request.payload));
+  await ensureDocumentMetadataIndex(db);
   await assertProjectAndSource(db, request.metadata.projectId, request.metadata.sourceId);
 
   const existing = await db
@@ -725,6 +727,7 @@ export async function searchDocumentMetadata(options: DocumentSearchOptions): Pr
   total: number;
 }> {
   const db = await getDocumentDatabase();
+  await ensureDocumentMetadataIndex(db);
   const fts = compileDocumentFtsQuery(options.query ?? "");
   const clauses: string[] = [];
   const bindings: unknown[] = [];

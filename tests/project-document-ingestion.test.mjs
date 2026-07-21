@@ -18,6 +18,7 @@ const {
   sha256Hex,
 } = await import("../app/lib/project-documents/contracts.ts");
 const { parseExtractionInput } = await import("../app/lib/project-documents/extraction.ts");
+const { ensureDocumentMetadataIndex } = await import("../app/lib/project-documents/metadata-index.ts");
 const { readRemoteProjectDocument } = await import("../app/lib/project-documents/ingestion.ts");
 const { persistProjectDocument } = await import("../app/lib/project-documents/storage.ts");
 
@@ -262,13 +263,13 @@ test("extraction handoff preserves page provenance and bounds searchable text", 
   );
 });
 
-test("migration 0010 adds content-addressed blobs and trigger-maintained metadata FTS", async () => {
+test("migration 0010 adds metadata FTS and runtime initialization maintains its triggers", async () => {
   const migration = await readFile(new URL("../drizzle/0010_sticky_mephisto.sql", import.meta.url), "utf8");
   assert.match(migration, /CREATE TABLE `document_blobs`/);
   assert.match(migration, /`content_hash` text PRIMARY KEY NOT NULL/);
   assert.match(migration, /CREATE UNIQUE INDEX `document_blobs_object_key_uidx`/);
   assert.match(migration, /CREATE VIRTUAL TABLE `document_metadata_fts` USING fts5/);
-  assert.match(migration, /CREATE TRIGGER `documents_metadata_fts_(?:insert|update|delete)`/);
+  assert.doesNotMatch(migration, /CREATE TRIGGER/);
   assert.match(migration, /ALTER TABLE `documents` ADD `visibility` text DEFAULT 'workspace' NOT NULL/);
   assert.match(migration, /ALTER TABLE `documents` ADD `redistribution_allowed` integer DEFAULT false NOT NULL/);
 
@@ -298,6 +299,11 @@ test("migration 0010 adds content-addressed blobs and trigger-maintained metadat
     for (const statement of migration.split("--> statement-breakpoint").map((part) => part.trim()).filter(Boolean)) {
       database.exec(statement);
     }
+    await ensureDocumentMetadataIndex({
+      prepare(sql) {
+        return { run: async () => database.prepare(sql).run() };
+      },
+    });
     assert.equal(
       database.prepare("SELECT name FROM document_metadata_fts WHERE document_id='doc_existing'").get()?.name,
       "Old plans",

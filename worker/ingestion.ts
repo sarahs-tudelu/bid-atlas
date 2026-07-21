@@ -4,6 +4,7 @@ import {
   TUDELU_PUBLIC_PROFILE,
 } from "../app/lib/company-profile";
 import { projectMetadataText } from "../app/lib/search";
+import { ensureDocumentMetadataIndex } from "../app/lib/project-documents/metadata-index";
 import type {
   ProjectDocument,
   ProjectParticipant,
@@ -1173,6 +1174,7 @@ export async function runIngestion(
   let primaryFailure = false;
 
   try {
+    await ensureDocumentMetadataIndex(env.DB);
     await env.DB
       .prepare(
         `INSERT INTO ingestion_runs (

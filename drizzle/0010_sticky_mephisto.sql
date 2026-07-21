@@ -57,29 +57,3 @@ SELECT
 	`id`, `project_id`, `name`, `document_type`, `description`, coalesce(`discipline`, ''),
 	coalesce(`sheet_numbers`, '[]'), coalesce(`keywords`, '[]'), `search_text`, `source_url`
 FROM `documents`;--> statement-breakpoint
-CREATE TRIGGER `documents_metadata_fts_insert` AFTER INSERT ON `documents` BEGIN
-	INSERT INTO `document_metadata_fts` (
-		`document_id`, `project_id`, `name`, `document_type`, `description`, `discipline`,
-		`sheet_numbers`, `keywords`, `search_text`, `source_url`
-	) VALUES (
-		new.`id`, new.`project_id`, new.`name`, new.`document_type`, new.`description`,
-		coalesce(new.`discipline`, ''), coalesce(new.`sheet_numbers`, '[]'),
-		coalesce(new.`keywords`, '[]'), new.`search_text`, new.`source_url`
-	);
-END;--> statement-breakpoint
-CREATE TRIGGER `documents_metadata_fts_update` AFTER UPDATE OF
-	`project_id`, `name`, `document_type`, `description`, `discipline`, `sheet_numbers`,
-	`keywords`, `search_text`, `source_url` ON `documents` BEGIN
-	DELETE FROM `document_metadata_fts` WHERE `document_id` = old.`id`;
-	INSERT INTO `document_metadata_fts` (
-		`document_id`, `project_id`, `name`, `document_type`, `description`, `discipline`,
-		`sheet_numbers`, `keywords`, `search_text`, `source_url`
-	) VALUES (
-		new.`id`, new.`project_id`, new.`name`, new.`document_type`, new.`description`,
-		coalesce(new.`discipline`, ''), coalesce(new.`sheet_numbers`, '[]'),
-		coalesce(new.`keywords`, '[]'), new.`search_text`, new.`source_url`
-	);
-END;--> statement-breakpoint
-CREATE TRIGGER `documents_metadata_fts_delete` AFTER DELETE ON `documents` BEGIN
-	DELETE FROM `document_metadata_fts` WHERE `document_id` = old.`id`;
-END;
