@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ssl
 from datetime import date
 from urllib.parse import parse_qs, urlparse
 
@@ -17,6 +18,7 @@ from backend.app.services.northeast_portals import (
     MASSACHUSETTS_SOURCE_ID,
     PENNSYLVANIA_SOURCE_ID,
     WEBPROCURE_SOURCES,
+    _webprocure_ssl_context,
     fetch_vermont_projects,
     fetch_webprocure_source,
     parse_massachusetts_dcr_projects,
@@ -66,6 +68,13 @@ PENNSYLVANIA_HTML = """
 <h3>Awarded Bids</h3>
 <ul><li>DGS 100-01 - Old award</li></ul>
 """
+
+
+def test_webprocure_context_preserves_tls_verification() -> None:
+    context = _webprocure_ssl_context()
+
+    assert context.check_hostname is True
+    assert context.verify_mode == ssl.CERT_REQUIRED
 
 
 def test_maine_and_new_york_parsers_keep_official_current_records() -> None:

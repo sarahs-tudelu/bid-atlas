@@ -58,6 +58,8 @@ The active scheduled adapters cover:
 - NHDOT and VTrans official ArcGIS project services;
 - optional SAM.gov active federal notices by Northeast place of performance.
 
+The WebProcure adapter uses normal hostname and certificate verification plus a checksum-pinned DigiCert `Thawte TLS RSA CA G1` intermediate for that host because the publisher currently omits the intermediate from its server chain. This host-specific trust-chain completion must be removed when the publisher repairs its TLS configuration or reviewed before the intermediate expires on November 2, 2027. Disabling TLS verification is not an accepted fallback.
+
 Each source declares its state and coverage class. A live source can be partial even when it currently yields zero qualified records. No adapter marks a state complete.
 
 ## Frontend boundaries

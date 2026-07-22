@@ -392,6 +392,8 @@ AWS also seeds these exports into the private catalog bucket. The daily Northeas
 - NHDOT and VTrans official ArcGIS project services, narrowed to canopy-relevant lifecycle records;
 - optional SAM.gov active federal opportunities, fanned out by each Northeast state and direct canopy/proxy query when a key is configured.
 
+WebProcure currently serves an incomplete TLS chain for its public search API. The Lambda connector keeps hostname and certificate verification enabled and adds only DigiCert's official `Thawte TLS RSA CA G1` intermediate for the `webprocure.proactiscloud.com` host. The checked-in certificate is SHA-256 pinned to `4bcc5e234fe81ede4eaf883aa19c31335b0b26e85e066b9945e4cb6153eb20c2` and expires November 2, 2027. Remove the host-specific workaround when WebProcure repairs its chain, or review and replace it from DigiCert's official certificate repository before that date; never replace it by disabling TLS verification.
+
 Each source returns its own result partition. The merge replaces only successful partitions, retains the previous records for a failed source, marks that source degraded, recomputes inventory/coverage, and writes a new version of `current-projects.json`. A successful zero-result board remains live with `loadedCount: 0`; this means the source was checked and produced no current qualified matches, not that the source is disconnected.
 
 The remaining files in `data-export` document export provenance and database verification but are not currently loaded by FastAPI.

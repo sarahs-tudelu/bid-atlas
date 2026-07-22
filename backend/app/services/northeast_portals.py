@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
 import re
+import ssl
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
+from functools import lru_cache
 from html import unescape
 from html.parser import HTMLParser
+from pathlib import Path
 from typing import Any, Callable
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urlparse
@@ -37,6 +42,8 @@ PENNSYLVANIA_SOURCE_URL = (
 )
 
 WEBPROCURE_API_URL = "https://webprocure.proactiscloud.com/wp-full-text-search"
+WEBPROCURE_HOST = "webprocure.proactiscloud.com"
+WEBPROCURE_CA_SHA256 = "4bcc5e234fe81ede4eaf883aa19c31335b0b26e85e066b9945e4cb6153eb20c2"
 MAX_JSON_BYTES = 12_000_000
 EMAIL_PATTERN = re.compile(r"[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
 
@@ -113,6 +120,26 @@ def _clean_text(value: Any) -> str:
     return re.sub(r"\s+", " ", unescape(str(value or ""))).strip()
 
 
+@lru_cache(maxsize=1)
+def _webprocure_ssl_context() -> ssl.SSLContext:
+    """Complete WebProcure's currently incomplete public certificate chain."""
+
+    certificate_path = (
+        Path(__file__).resolve().parent.parent
+        / "certificates"
+        / "ThawteTLSRSACAG1.crt.pem"
+    )
+    certificate_pem = certificate_path.read_text(encoding="ascii")
+    certificate_der = ssl.PEM_cert_to_DER_cert(certificate_pem)
+    actual_sha256 = hashlib.sha256(certificate_der).hexdigest()
+    if not hmac.compare_digest(actual_sha256, WEBPROCURE_CA_SHA256):
+        raise RuntimeError("Bundled WebProcure intermediate certificate failed validation")
+
+    context = ssl.create_default_context()
+    context.load_verify_locations(cafile=str(certificate_path))
+    return context
+
+
 def _iso_from_epoch(value: Any) -> str | None:
     if not isinstance(value, (int, float)) or value <= 0:
         return None
@@ -138,12 +165,14 @@ def fetch_public_json(url: str, timeout_seconds: int = 45) -> dict[str, Any]:
         "maps.dot.nh.gov",
         "maps.vtrans.vermont.gov",
     }
+    hostname = urlparse(url).hostname
     request = Request(
         url,
         headers={"Accept": "application/json", "User-Agent": "BidAtlas/1.0 public-construction-index"},
     )
+    ssl_context = _webprocure_ssl_context() if hostname == WEBPROCURE_HOST else None
     try:
-        with urlopen(request, timeout=timeout_seconds) as response:
+        with urlopen(request, timeout=timeout_seconds, context=ssl_context) as response:
             if urlparse(response.geturl()).hostname not in allowed_hosts:
                 raise ValueError("Public data service redirected to an unexpected host")
             payload = response.read(MAX_JSON_BYTES + 1)

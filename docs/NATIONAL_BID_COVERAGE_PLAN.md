@@ -179,6 +179,8 @@ The active AWS application now runs a daily Northeast regional refresh:
 - New Hampshire and Vermont: official DOT/VTrans ArcGIS project services, narrowed to relevant lifecycle records; Vermont factsheets add published project contacts when available.
 - Optional federal layer: active SAM.gov opportunities fanned out by each Northeast state and canopy/proxy query when an SSM-backed API key is configured.
 
+The CT/RI WebProcure adapter completes the publisher's currently incomplete server chain with DigiCert's official, checksum-pinned `Thawte TLS RSA CA G1` intermediate while retaining full TLS and hostname verification. Review or remove that narrowly scoped workaround before the intermediate expires on November 2, 2027.
+
 The refresh replaces only successful source partitions. A failed source retains its previous records and becomes degraded; a successfully checked source with no current qualified matches remains live with a zero count. Search traffic always reads the private versioned S3 snapshot and never waits on these publishers.
 
 All state coverage remains `partial`. These adapters represent named agencies or boards, not every municipality, school, authority, permit office, private project, or procurement platform in a state. SAM.gov results are tracked as federal procurement rather than used to inflate statewide procurement coverage.
