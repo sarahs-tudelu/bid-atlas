@@ -17,9 +17,9 @@ This document describes the active React/FastAPI/AWS implementation. The complet
 ## System context
 
 ```text
-                         Google OAuth / Gmail API
-                                  ^
-                                  |
+                   Google OAuth / Gmail API     Anthropic Messages API
+                              ^                         ^
+                              |                         |
 Tudelu browser -> CloudFront -> API Gateway -> FastAPI Lambda
        |              |                              |
        |              +-> private frontend S3       +-> DynamoDB workspace
@@ -60,13 +60,17 @@ The state cookie lasts 10 minutes. The application session lasts 12 hours and is
 
 Gmail access is restricted to the configured `gmail.readonly` and `gmail.send` scopes. History normalization discards bodies and stores only headers, short snippets, and provider IDs. Sending uses `users/me/messages/send`, so the authenticated mailbox is the sender.
 
+### Anthropic provider boundary
+
+The API Lambda alone can decrypt the Anthropic key. Initial email generation does not call Anthropic; it creates a deterministic signed template. Only `personalize: true` sends Claude a bounded project-facts object and at most 20 Gmail metadata/snippet records; full bodies and Gmail provider IDs are excluded. Prompts label source and Gmail material as untrusted data. Claude supplies only editable subject/body text and cannot select a recipient, choose a sender, access OAuth tokens, or send mail. FastAPI appends the verified rep’s Tudelu signature after generation.
+
 ### AWS secret boundary
 
-Parameter Store contains four SecureStrings. Lambda environment variables contain only their names. IAM resources are exact parameter ARNs:
+Parameter Store contains five SecureStrings. Lambda environment variables contain only their names. IAM resources are exact parameter ARNs:
 
 | Consumer | Parameters |
 | --- | --- |
-| API Lambda | Google client ID, Google client secret, session secret |
+| API Lambda | Google client ID, Google client secret, session secret, Anthropic API key |
 | Refresh Lambda | SAM.gov API key |
 
 The Google client ID is not intrinsically confidential, but it follows the same promotion and configuration workflow to avoid coupling deployment to a local ignored file.
@@ -89,7 +93,8 @@ The checked-in `data-export/current-projects.json` is a reproducible deployment 
 
 ```text
 visible(project) = canopy_score(project) >= 8
-                   AND count(valid_source_published_email(project)) > 0
+                   AND (count(valid_source_published_email(project)) > 0
+                        OR count(valid_source_published_phone(project)) > 0)
 ```
 
 `services/qualification.py` owns this invariant. No route should duplicate or weaken it. A new catalog surface must operate on `ProjectCatalog.projects` or explicitly call the same predicate.
@@ -116,28 +121,37 @@ The CT/RI connector includes a narrowly scoped, checksum-pinned Thawte intermedi
 ## Outreach sequence
 
 ```text
-React             FastAPI              DynamoDB             Gmail
-  | generate         |                     |                   |
-  |----------------->| load admitted       |                   |
-  |                  | project/account --->|                   |
-  |                  | list messages/threads ----------------->|
-  |                  | normalize metadata <--------------------|
-  |                  | store draft/history ->|                 |
-  |<-----------------|                     |                   |
-  | edit + save      |                     |                   |
-  |----------------->| revalidate recipient|                   |
-  |                  | store draft ------->|                   |
-  |<-----------------|                     |                   |
-  | confirm + send   |                     |                   |
-  |----------------->| revalidate all      |                   |
-  |                  | conditional lock -->|                   |
-  |                  | users/me/send ------------------------->|
-  |                  | provider IDs <--------------------------|
-  |                  | sent audit + unlock>|                   |
-  |<-----------------|                     |                   |
+React             FastAPI              DynamoDB             Gmail        Claude
+  | generate         |                     |                   |             |
+  |----------------->| load admitted       |                   |             |
+  |                  | project/account --->|                   |             |
+  |                  | list messages/threads ----------------->|             |
+  |                  | normalize metadata <--------------------|             |
+  |                  | create template      |                   |             |
+  |                  | store draft/history ->|                  |             |
+  |<-----------------|                     |                   |             |
+  | personalize AI   |                     |                   |             |
+  |----------------->| bounded facts/snippets ------------------------------>|
+  |                  | subject/body <----------------------------------------|
+  |                  | append signature     |                   |             |
+  |                  | replace draft ------>|                   |             |
+  |<-----------------|                     |                   |             |
+  | edit + save      |                     |                   |             |
+  |----------------->| revalidate recipient|                   |             |
+  |                  | store draft ------->|                   |             |
+  |<-----------------|                     |                   |             |
+  | confirm + send   |                     |                   |             |
+  |----------------->| revalidate all      |                   |             |
+  |                  | conditional lock -->|                   |             |
+  |                  | users/me/send ------------------------->|             |
+  |                  | provider IDs <--------------------------|             |
+  |                  | sent audit + unlock>|                   |             |
+  |<-----------------|                     |                   |             |
 ```
 
 The draft payload is never trusted as recipient authority. Save and send reload the current admitted project and compare the normalized `to` address with its published contacts. Subject line breaks are rejected. The send path refuses an existing sent record and acquires an atomic `put_if_absent` record before contacting Gmail. The lock is removed in a `finally` block after success or provider failure.
+
+Phone is an independent optional contact path. Phone-only projects pass catalog admission and render a `tel:` action, but `/api/outreach/generate` returns `400` unless the current project also has a source-published email. Calls are initiated by the user’s device and are not logged as Gmail outreach.
 
 Generating or saving is not evidence of delivery. Only a successful Gmail API response creates sent status. Stored provider IDs support later reconciliation without retaining a raw RFC 2822 message.
 
@@ -165,6 +179,8 @@ The documents S3 bucket is an encrypted, versioned, retained boundary for future
 
 `AppShell` shows the current email and sign-out. Search pages use URL query parameters as shareable state. `OutreachPage` keeps selected-project draft state isolated, renders provider metadata, restricts recipients to a source-backed select, requires browser confirmation, and disables mutations after sent status.
 
+Project cards and Bid Desk derive independent email and phone actions from published participants. The Outreach project picker filters to email-capable projects. Its initial draft is deterministic; the explicit personalization button is the only frontend path that invokes Claude.
+
 The UI gate is a usability boundary; the FastAPI dependency is the authorization boundary.
 
 ## Backend composition
@@ -180,6 +196,7 @@ The UI gate is a usability boundary; the FastAPI dependency is the authorization
 | `api/outreach.py` | authenticated generate/history/save/send orchestration |
 | `services/auth.py` | identity predicate and purpose-bound signed payloads |
 | `services/google.py` | Google HTTP/OAuth/token/Gmail client |
+| `services/ai_outreach.py` | SAM-style Anthropic prompt, bounded context, response validation, fixed Tudelu signature |
 | `services/runtime_secrets.py` | lazy cached SSM decryption |
 | `services/qualification.py` | global visibility and published contacts |
 | `services/catalog.py` | catalog admission, filters, sort, paging, aggregates |
@@ -197,6 +214,8 @@ The Google service deliberately uses Python’s standard HTTP library, keeping t
 - OAuth state/domain failure: callback refuses the login without creating an account/session.
 - Revoked/missing refresh token: Gmail operation returns a reconnect error; no sent record is written.
 - Gmail provider/network failure: `502`; send lock is released; draft remains unsent.
+- Anthropic missing-key/provider/invalid-output failure: `502`; no draft is stored and Gmail is not contacted for sending.
+- Phone-only project passed to email generation: `400` with direction to use the call option.
 - Concurrent send: `409`; second request does not contact Gmail.
 - Previously sent draft mutation/resend: `409`.
 - Catalog S3 failure: API serves its last valid in-memory or packaged catalog.

@@ -5,6 +5,7 @@ import { apiRequest } from "../api/client";
 import { AsyncState } from "../components/AsyncState";
 import { useToast } from "../components/ToastProvider";
 import { useApi } from "../hooks/useApi";
+import { emailContacts, phoneContacts, telephoneHref } from "../lib/contacts";
 import { describeDeadline, formatDateTime, formatMoney } from "../lib/format";
 import type { Project, ProjectDocument, ProjectParticipant } from "../types";
 
@@ -44,7 +45,7 @@ function Contact({ participant }: { participant: ProjectParticipant }) {
       <strong>{participant.name || participant.organization || "Unnamed contact"}</strong>
       <span>{[participant.role, participant.name && participant.organization].filter(Boolean).join(" · ") || "Role not published"}</span>
       {participant.email && <a href={`mailto:${participant.email}`}>{participant.email}</a>}
-      {participant.phone && <a href={`tel:${participant.phone.replace(/[^\d+]/g, "")}`}>{participant.phone}</a>}
+      {participant.phone && <a href={telephoneHref(participant.phone)}>{participant.phone}</a>}
     </li>
   );
 }
@@ -126,6 +127,8 @@ export function BidDeskPage() {
 
   const project = projectState.data;
   const deadline = useMemo(() => describeDeadline(project?.bidDate), [project?.bidDate]);
+  const emailContact = project ? emailContacts(project)[0] : undefined;
+  const phoneContact = project ? phoneContacts(project)[0] : undefined;
 
   if (!projectId) {
     return (
@@ -164,9 +167,16 @@ export function BidDeskPage() {
                 <a className="button button-primary" href={project.sourceUrl} target="_blank" rel="noreferrer">
                   Verify official record ↗
                 </a>
-                <Link className="button button-quiet" to={`/outreach?project=${encodeURIComponent(project.id)}`}>
-                  Email outreach
-                </Link>
+                {emailContact ? (
+                  <Link className="button button-quiet" to={`/outreach?project=${encodeURIComponent(project.id)}`}>
+                    Email outreach
+                  </Link>
+                ) : null}
+                {phoneContact?.phone ? (
+                  <a className="button button-quiet" href={telephoneHref(phoneContact.phone)}>
+                    Call {phoneContact.phone}
+                  </a>
+                ) : null}
                 <Link className="button button-quiet" to="/projects">
                   Back to bids
                 </Link>

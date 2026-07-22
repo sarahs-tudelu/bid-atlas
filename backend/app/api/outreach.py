@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from ..dependencies import get_catalog, get_workspace_store
+from ..services.ai_outreach import AnthropicGenerationError
 from ..services.catalog import ProjectCatalog
 from ..services.google import GoogleApiError, gmail_history, send_gmail_message
 from ..services.outreach import generate_outreach_draft, validate_draft
@@ -21,6 +22,8 @@ router = APIRouter(prefix="/api/outreach", tags=["outreach"])
 class GenerateRequest(BaseModel):
     projectId: str = Field(min_length=1, max_length=300)
     regenerate: bool = False
+    personalize: bool = False
+    to: str = Field(default="", max_length=254)
 
 
 class DraftRequest(BaseModel):
@@ -70,6 +73,28 @@ def _sync_history(
         raise HTTPException(status_code=502, detail=str(error)) from error
 
 
+def _generate_draft(
+    project: dict[str, Any],
+    user: dict[str, Any],
+    history: list[dict[str, Any]],
+    *,
+    personalize: bool,
+    recipient: str,
+) -> dict[str, Any]:
+    try:
+        return generate_outreach_draft(
+            project,
+            user,
+            history,
+            personalize=personalize,
+            recipient=recipient,
+        )
+    except AnthropicGenerationError as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+
+
 @router.get("/draft")
 def get_draft(
     project_id: str = Query(alias="projectId", min_length=1, max_length=300),
@@ -93,8 +118,19 @@ def generate(
     if existing is not None and not payload.regenerate:
         return {"draft": existing, "reused": True}
     project = _project_or_404(payload.projectId, catalog)
+    if not published_contacts(project):
+        raise HTTPException(
+            status_code=400,
+            detail="This project has a published phone contact but no email contact; use the call option",
+        )
     history = _sync_history(owner, project, store)
-    draft = generate_outreach_draft(project)
+    draft = _generate_draft(
+        project,
+        user,
+        history,
+        personalize=payload.personalize,
+        recipient=payload.to,
+    )
     draft["emailHistory"] = history
     draft["historySyncedAt"] = datetime.now(timezone.utc).isoformat()
     stored = store.put(owner, f"outreach#{payload.projectId}", draft)
@@ -110,7 +146,9 @@ def refresh_gmail_history(
 ) -> dict[str, Any]:
     owner = user["email"]
     project = _project_or_404(payload.projectId, catalog)
-    existing = store.get(owner, f"outreach#{payload.projectId}") or generate_outreach_draft(project)
+    existing = store.get(owner, f"outreach#{payload.projectId}")
+    if existing is None:
+        raise HTTPException(status_code=404, detail="Generate an email draft before refreshing Gmail history")
     stored = store.put(
         owner,
         f"outreach#{payload.projectId}",
@@ -132,7 +170,9 @@ def save_draft(
 ) -> dict[str, Any]:
     owner = user["email"]
     project = _project_or_404(payload.projectId, catalog)
-    existing = store.get(owner, f"outreach#{payload.projectId}") or generate_outreach_draft(project)
+    existing = store.get(owner, f"outreach#{payload.projectId}")
+    if existing is None:
+        raise HTTPException(status_code=404, detail="Generate an email draft before saving it")
     if existing.get("status") == "sent":
         raise HTTPException(status_code=409, detail="Sent outreach cannot be edited")
     try:

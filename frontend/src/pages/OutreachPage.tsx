@@ -5,6 +5,7 @@ import { apiRequest, queryString } from "../api/client";
 import { AsyncState } from "../components/AsyncState";
 import { useApi } from "../hooks/useApi";
 import { useAuth } from "../hooks/useAuth";
+import { emailContacts } from "../lib/contacts";
 import type { OutreachDraft, Project, SearchResponse } from "../types";
 
 interface DraftResponse {
@@ -65,6 +66,10 @@ export function OutreachPage() {
     () => candidates.data?.projects.find((project) => project.id === projectId),
     [candidates.data, projectId],
   );
+  const emailCandidates = useMemo(
+    () => candidates.data?.projects.filter((project) => emailContacts(project).length > 0) ?? [],
+    [candidates.data],
+  );
 
   const save = async (): Promise<void> => {
     if (!draft || draft.status === "sent") return;
@@ -114,23 +119,25 @@ export function OutreachPage() {
     }
   };
 
-  const regenerate = async (): Promise<void> => {
+  const personalize = async (): Promise<void> => {
     if (!projectId || draft?.status === "sent") return;
-    setSaveStatus("Regenerating…");
+    setSaveStatus("Personalizing with Claude…");
     try {
       const response = await apiRequest<DraftResponse>("/api/outreach/generate", {
         method: "POST",
-        body: JSON.stringify({ projectId, regenerate: true }),
+        body: JSON.stringify({
+          projectId,
+          regenerate: true,
+          personalize: true,
+          to: draft?.to ?? "",
+        }),
       });
       setDraft(response.draft);
       setFailure(null);
-      setSaveStatus("Draft and Gmail contact history refreshed from source evidence.");
+      setSaveStatus("AI personalization applied. Review the draft before sending.");
       history.refetch();
     } catch (cause) {
-      setFailure({
-        projectId,
-        message: cause instanceof Error ? cause.message : "The outreach draft could not be regenerated.",
-      });
+      setSaveStatus(cause instanceof Error ? cause.message : "The draft could not be personalized.");
     }
   };
 
@@ -140,7 +147,7 @@ export function OutreachPage() {
         <p className="eyebrow">GMAIL-CONNECTED OUTREACH</p>
         <h1>Review contact history, then send from your Tudelu mailbox.</h1>
         <p>
-          BidAtlas uses only contacts published with a qualified project. Every message requires your explicit review and confirmation.
+          Start with a signed Tudelu template, then optionally personalize it with Claude using source evidence and prior contact snippets. Every message requires your review and confirmation.
         </p>
       </header>
 
@@ -156,7 +163,7 @@ export function OutreachPage() {
           disabled={candidates.loading}
         >
           <option value="">Choose a qualified project</option>
-          {candidates.data?.projects.map((project: Project) => (
+          {emailCandidates.map((project: Project) => (
             <option key={project.id} value={project.id}>
               {project.state ?? "US"} · Fit {project.canopyFit?.score ?? 0} · {project.title}
             </option>
@@ -184,8 +191,13 @@ export function OutreachPage() {
             <form className="draft-form" onSubmit={(event) => { event.preventDefault(); void save(); }}>
               <div className="draft-form-heading">
                 <div><p className="eyebrow">REVIEWED DRAFT</p><h2>{draft.status === "sent" ? "Sent outreach" : "Outreach draft"}</h2></div>
-                <button className="link-button" type="button" disabled={draft.status === "sent"} onClick={() => void regenerate()}>Regenerate</button>
+                <button className="link-button" type="button" disabled={draft.status === "sent"} onClick={() => void personalize()}>
+                  {draft.generation?.provider === "anthropic" ? "Re-personalize with AI" : "Personalize with AI"}
+                </button>
               </div>
+              {draft.generation?.provider === "anthropic" ? (
+                <p className="field-hint">AI-generated with {draft.generation.model}. Review the source facts, recipient, and message before sending.</p>
+              ) : <p className="field-hint">Signed Tudelu template. AI personalization is optional.</p>}
 
               <label>
                 <span>Published contact</span>
@@ -239,7 +251,7 @@ export function OutreachPage() {
       {!projectId && !draftLoading ? (
         <div className="empty-panel">
           <h2>Choose a contactable canopy opportunity</h2>
-          <p>Every visible project has a published contact and meets the Canopy fit threshold.</p>
+          <p>Every visible project has a published email or phone number and meets the Canopy fit threshold.</p>
           <Link className="button button-primary" to="/projects?profile=direct_northeast">Find Northeast canopy work</Link>
         </div>
       ) : null}

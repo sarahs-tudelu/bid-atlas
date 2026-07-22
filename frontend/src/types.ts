@@ -88,6 +88,10 @@ export interface OutreachDraft {
   gmailThreadId?: string;
   emailHistory?: GmailThreadSummary[];
   historySyncedAt?: string;
+  generation?: {
+    provider: "template" | "anthropic";
+    model?: string;
+  };
 }
 
 export interface Project {

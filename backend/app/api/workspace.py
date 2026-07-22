@@ -6,6 +6,7 @@ from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
+from ..config import settings
 from ..dependencies import get_workspace_store
 from ..services.google import oauth_is_configured
 from ..services.state import WorkspaceStore
@@ -66,6 +67,9 @@ def create_source_monitor(
 @router.get("/integrations")
 def integrations() -> dict[str, Any]:
     sam_configured = os.getenv("BIDATLAS_SAM_ENABLED", "false").casefold() == "true"
+    anthropic_configured = bool(
+        settings.anthropic_api_key or settings.anthropic_api_key_parameter
+    )
     return {
         "providers": [
             {
@@ -79,6 +83,12 @@ def integrations() -> dict[str, Any]:
                 "name": "SAM.gov",
                 "configured": sam_configured,
                 "detail": "Daily Northeast federal canopy discovery through the official opportunities API.",
+            },
+            {
+                "id": "anthropic",
+                "name": "Anthropic Claude",
+                "configured": anthropic_configured,
+                "detail": "Optional SAM-style email personalization; default outreach templates do not call AI.",
             },
             {
                 "id": "apollo",

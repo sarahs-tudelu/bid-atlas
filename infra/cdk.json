@@ -9,6 +9,7 @@
     "samApiKeyParameterName": "/BidAtlas/sam-api-key",
     "googleClientIdParameterName": "/BidAtlas/google-client-id",
     "googleClientSecretParameterName": "/BidAtlas/google-client-secret",
-    "sessionSecretParameterName": "/BidAtlas/session-secret"
+    "sessionSecretParameterName": "/BidAtlas/session-secret",
+    "anthropicApiKeyParameterName": "/BidAtlas/anthropic-api-key"
   }
 }

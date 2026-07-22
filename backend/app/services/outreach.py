@@ -2,39 +2,71 @@ from __future__ import annotations
 
 from typing import Any
 
+from ..config import settings
+from .ai_outreach import generate_ai_email, tudelu_signature
 from .canopy import score_project
 from .qualification import EMAIL, published_contacts
 
 
-def generate_outreach_draft(project: dict[str, Any]) -> dict[str, Any]:
+def generate_outreach_draft(
+    project: dict[str, Any],
+    user: dict[str, Any],
+    email_history: list[dict[str, Any]],
+    *,
+    personalize: bool = False,
+    recipient: str = "",
+) -> dict[str, Any]:
     contacts = published_contacts(project)
-    contact = contacts[0] if contacts else {"name": "", "email": "", "phone": "", "role": ""}
-    greeting_name = contact["name"].split()[0] if contact["name"] else "there"
+    if not contacts:
+        raise ValueError("A published email contact is required for email outreach")
+    normalized_recipient = recipient.strip().lower()
+    contact = next(
+        (item for item in contacts if item["email"] == normalized_recipient),
+        contacts[0] if not normalized_recipient else None,
+    )
+    if contact is None:
+        raise ValueError("Recipient must be an email address published with this project")
     reference = str(project.get("sourceRecordId") or project.get("id") or "the project")
     title = str(project.get("title") or "this project").strip()
-    location = ", ".join(
-        str(value).strip()
-        for value in (project.get("city") or project.get("county"), project.get("state"))
-        if value
-    )
-    location_phrase = f" in {location}" if location else ""
-    subject = f"Canopy support for {reference}"
-    body = (
-        f"Hi {greeting_name}, I’m reaching out from Tudelu about {title}{location_phrase}. "
-        "We design and manufacture custom-engineered aluminum architectural canopies, covered walkways, and entrance systems with integrated drainage and finish options. "
-        "Could you share the current drawings, addenda, and the preferred path for a specialty canopy manufacturer to support the project?"
-    )
+    canopy_fit = score_project(project)
+    if personalize:
+        generated = generate_ai_email(
+            {**project, "canopyFit": canopy_fit},
+            user,
+            contact,
+            email_history,
+        )
+        generation = {"provider": "anthropic", "model": settings.anthropic_model}
+    else:
+        greeting_name = contact["name"].split()[0] if contact["name"] else "there"
+        location = ", ".join(
+            str(value).strip()
+            for value in (project.get("city") or project.get("county"), project.get("state"))
+            if value
+        )
+        location_phrase = f" in {location}" if location else ""
+        body = (
+            f"Hi {greeting_name}, I’m reaching out from Tudelu about {title}{location_phrase}. "
+            "We design and manufacture custom-engineered aluminum architectural canopies, covered walkways, and entrance systems. "
+            "Could you share the current drawings, addenda, and preferred path for a specialty canopy manufacturer to support the project?"
+        )
+        generated = {
+            "subject": f"Canopy support for {reference}",
+            "body": f"{body}\n\n{tudelu_signature(user)}",
+        }
+        generation = {"provider": "template"}
     return {
         "projectId": str(project["id"]),
         "projectTitle": title,
         "sourceRecordId": reference,
         "to": contact["email"],
         "contactName": contact["name"],
-        "subject": subject,
-        "body": body,
+        "subject": generated["subject"],
+        "body": generated["body"],
         "status": "draft",
         "contacts": contacts,
-        "canopyFit": score_project(project),
+        "canopyFit": canopy_fit,
+        "generation": generation,
     }
 
 

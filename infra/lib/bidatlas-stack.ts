@@ -24,6 +24,7 @@ export class BidAtlasStack extends cdk.Stack {
     const googleClientIdParameterName = this.node.tryGetContext("googleClientIdParameterName") as string | undefined;
     const googleClientSecretParameterName = this.node.tryGetContext("googleClientSecretParameterName") as string | undefined;
     const sessionSecretParameterName = this.node.tryGetContext("sessionSecretParameterName") as string | undefined;
+    const anthropicApiKeyParameterName = this.node.tryGetContext("anthropicApiKeyParameterName") as string | undefined;
     const publicUrl = (this.node.tryGetContext("publicUrl") as string | undefined)?.replace(/\/$/, "")
       ?? "http://localhost:5173";
 
@@ -117,6 +118,7 @@ export class BidAtlasStack extends cdk.Stack {
         BIDATLAS_GOOGLE_REDIRECT_URI: `${publicUrl}/api/auth/google/callback`,
         BIDATLAS_CORS_ORIGINS: publicUrl,
         BIDATLAS_SAM_ENABLED: samApiKeyParameterName ? "true" : "false",
+        BIDATLAS_ANTHROPIC_MODEL: "claude-sonnet-4-6",
         ...(googleClientIdParameterName
           ? { BIDATLAS_GOOGLE_CLIENT_ID_PARAMETER: googleClientIdParameterName }
           : {}),
@@ -125,6 +127,9 @@ export class BidAtlasStack extends cdk.Stack {
           : {}),
         ...(sessionSecretParameterName
           ? { BIDATLAS_SESSION_SECRET_PARAMETER: sessionSecretParameterName }
+          : {}),
+        ...(anthropicApiKeyParameterName
+          ? { BIDATLAS_ANTHROPIC_API_KEY_PARAMETER: anthropicApiKeyParameterName }
           : {}),
       },
     });
@@ -137,6 +142,7 @@ export class BidAtlasStack extends cdk.Stack {
       googleClientIdParameterName,
       googleClientSecretParameterName,
       sessionSecretParameterName,
+      anthropicApiKeyParameterName,
     ].filter((name): name is string => Boolean(name));
     if (apiSecretParameters.length) {
       apiFunction.addToRolePolicy(new iam.PolicyStatement({

@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom";
 
 import { describeDeadline, formatMoney } from "../lib/format";
+import { emailContacts, phoneContacts, telephoneHref } from "../lib/contacts";
 import { STAGE_LABELS } from "./ProjectSearch";
 import type { Project } from "../types";
 
@@ -16,6 +17,8 @@ export function ProjectCard({ project }: { project: Project }) {
   const deadline = describeDeadline(project.bidDate);
   const stage = project.stage ?? "unclassified";
   const workspaceHref = `/bid-desk?project=${encodeURIComponent(project.id)}`;
+  const emailContact = emailContacts(project)[0];
+  const phoneContact = phoneContacts(project)[0];
 
   return (
     <article className="project-card">
@@ -74,9 +77,16 @@ export function ProjectCard({ project }: { project: Project }) {
         <Link className="button button-primary" to={workspaceHref}>
           Open bid desk
         </Link>
-        <Link className="button button-quiet" to={`/outreach?project=${encodeURIComponent(project.id)}`}>
-          Email outreach
-        </Link>
+        {emailContact ? (
+          <Link className="button button-quiet" to={`/outreach?project=${encodeURIComponent(project.id)}`}>
+            Email outreach
+          </Link>
+        ) : null}
+        {phoneContact?.phone ? (
+          <a className="button button-quiet" href={telephoneHref(phoneContact.phone)}>
+            Call {phoneContact.phone}
+          </a>
+        ) : null}
         <a className="button button-quiet" href={project.sourceUrl} target="_blank" rel="noreferrer">
           Official source ↗
         </a>

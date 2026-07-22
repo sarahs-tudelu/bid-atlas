@@ -27,6 +27,9 @@ class Settings:
     google_client_id_parameter: str | None
     google_client_secret_parameter: str | None
     session_secret_parameter: str | None
+    anthropic_api_key: str | None
+    anthropic_api_key_parameter: str | None
+    anthropic_model: str
 
 
 def load_settings() -> Settings:
@@ -74,6 +77,9 @@ def load_settings() -> Settings:
         google_client_id_parameter=os.getenv("BIDATLAS_GOOGLE_CLIENT_ID_PARAMETER") or None,
         google_client_secret_parameter=os.getenv("BIDATLAS_GOOGLE_CLIENT_SECRET_PARAMETER") or None,
         session_secret_parameter=os.getenv("BIDATLAS_SESSION_SECRET_PARAMETER") or None,
+        anthropic_api_key=os.getenv("BIDATLAS_ANTHROPIC_API_KEY") or os.getenv("ANTHROPIC_API_KEY") or None,
+        anthropic_api_key_parameter=os.getenv("BIDATLAS_ANTHROPIC_API_KEY_PARAMETER") or None,
+        anthropic_model=os.getenv("BIDATLAS_ANTHROPIC_MODEL", "claude-sonnet-4-6"),
     )
 
 
