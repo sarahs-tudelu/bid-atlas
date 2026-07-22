@@ -155,13 +155,13 @@ export class BidAtlasStack extends cdk.Stack {
       }));
     }
 
-    const northeastRefreshFunction = new lambda.Function(this, "NortheastRefreshFunction", {
+    const nationalRefreshFunction = new lambda.Function(this, "NationalRefreshFunction", {
       runtime: lambda.Runtime.PYTHON_3_12,
       architecture: lambda.Architecture.X86_64,
-      handler: "app.jobs.refresh_northeast.handler",
-      memorySize: 512,
-      timeout: cdk.Duration.minutes(5),
-      logGroup: new logs.LogGroup(this, "NortheastRefreshLogGroup", {
+      handler: "app.jobs.refresh_national.handler",
+      memorySize: 1024,
+      timeout: cdk.Duration.minutes(15),
+      logGroup: new logs.LogGroup(this, "NationalRefreshLogGroup", {
         retention: logs.RetentionDays.ONE_WEEK,
         removalPolicy: cdk.RemovalPolicy.DESTROY,
       }),
@@ -207,11 +207,11 @@ export class BidAtlasStack extends cdk.Stack {
           : {}),
       },
     });
-    catalogBucket.grantReadWrite(northeastRefreshFunction);
-    northeastRefreshFunction.node.addDependency(catalogDeployment);
+    catalogBucket.grantReadWrite(nationalRefreshFunction);
+    nationalRefreshFunction.node.addDependency(catalogDeployment);
 
     if (samApiKeyParameterName) {
-      northeastRefreshFunction.addToRolePolicy(new iam.PolicyStatement({
+      nationalRefreshFunction.addToRolePolicy(new iam.PolicyStatement({
         actions: ["ssm:GetParameter"],
         resources: [
           cdk.Stack.of(this).formatArn({
@@ -223,11 +223,11 @@ export class BidAtlasStack extends cdk.Stack {
       }));
     }
 
-    new events.Rule(this, "DailyNortheastRefresh", {
-      description: "Refresh official Northeast construction and canopy opportunity sources daily.",
+    new events.Rule(this, "DailyNationalRefresh", {
+      description: "Refresh regional construction sources and nationwide federal canopy opportunities daily.",
       schedule: events.Schedule.cron({ minute: "15", hour: "10" }),
       targets: [
-        new targets.LambdaFunction(northeastRefreshFunction, {
+        new targets.LambdaFunction(nationalRefreshFunction, {
           retryAttempts: 2,
         }),
       ],
@@ -328,8 +328,8 @@ function handler(event) {
     new cdk.CfnOutput(this, "WorkspaceTableName", { value: workspaceTable.tableName });
     new cdk.CfnOutput(this, "DocumentsBucketName", { value: documentsBucket.bucketName });
     new cdk.CfnOutput(this, "CatalogBucketName", { value: catalogBucket.bucketName });
-    new cdk.CfnOutput(this, "NortheastRefreshFunctionName", {
-      value: northeastRefreshFunction.functionName,
+    new cdk.CfnOutput(this, "NationalRefreshFunctionName", {
+      value: nationalRefreshFunction.functionName,
     });
   }
 }

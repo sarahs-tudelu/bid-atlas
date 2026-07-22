@@ -158,6 +158,8 @@ export interface CoverageResponse {
     localGovernmentUniverse: number;
     registryRowsAvailable: number;
     statesAndDistrict: number;
+    federalConnectedStates?: number;
+    federalExpectedStates?: number;
     connectedSourceGroups: number;
     identifiedSourceGroups: number;
     loadedProjectRecords: number;

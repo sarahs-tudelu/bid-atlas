@@ -19,7 +19,8 @@ Reviewers should reject a code change when the documented workflow no longer mat
 ```text
 Official state pages / public bid boards / ArcGIS / SAM.gov Opportunities API
   -> Daily EventBridge invocation
-  -> Northeast refresh Lambda fetches bounded, allowlisted sources
+  -> National refresh Lambda fetches bounded, allowlisted sources
+  -> Regional board adapters run alongside 51 independent SAM.gov state/D.C. partitions
   -> Each successful source partition is normalized and replaced
   -> Failed partitions retain their prior records and are marked degraded
   -> Versioned, encrypted private S3 catalog
@@ -57,7 +58,7 @@ The connector paginates with the API’s documented maximum of 1,000 records per
 | Workspace | Amazon DynamoDB | Per-Tudelu-user drafts, OAuth account tokens, outreach logs, monitors |
 | Secrets | AWS Systems Manager Parameter Store | Decrypted only at runtime under parameter-specific IAM grants |
 | Email/auth | Google OAuth 2.0 with PKCE; Gmail API | Tudelu identity, message metadata, per-user sending |
-| Scheduling | Amazon EventBridge | Daily Northeast ingestion |
+| Scheduling | Amazon EventBridge | Daily national federal ingestion plus regional board ingestion |
 | Compute | AWS Lambda | FastAPI API and scheduled connector runtime |
 | Web delivery | CloudFront + private S3 | HTTPS SPA, security headers, static caching, API proxy |
 | API ingress | API Gateway HTTP API | Same-origin `/api/*` and `/health` routing |
@@ -83,7 +84,7 @@ The score is a prioritization signal, not a claim that the notice definitively c
 
 Positive evidence includes architectural/metal/entrance canopies, covered walkways, shade structures, passenger shelters, entrance/facade work, inspection gates, pavilions, awnings, relevant fabrication, and selected NAICS codes. Tree canopy, aircraft/parachute canopy, fabric tents, equipment parts, and electrical service entrances receive negative weights.
 
-Reusable profiles are returned by `GET /api/search-presets`. `direct_northeast` covers CT, ME, MA, NH, RI, VT, NY, NJ, and PA with the same minimum score as the global admission gate.
+Reusable profiles are returned by `GET /api/search-presets`. `direct_national` covers all 50 states and D.C. with the same minimum score as the global admission gate. `direct_northeast` remains available as a narrower regional preset.
 
 ### Contact and email rules
 
@@ -153,9 +154,9 @@ Coverage separates raw connected-source inventory from the admitted Canopy queue
 - Connecticut and Rhode Island WebProcure boards;
 - Massachusetts DCR and Pennsylvania DGS;
 - New Hampshire DOT and Vermont VTrans/ArcGIS;
-- SAM.gov federal opportunities, fanned out by each Northeast state and canopy/proxy query.
+- SAM.gov federal opportunities, fanned out into independent partitions for all 50 states and D.C.; each partition runs every configured canopy/proxy query.
 
-All state coverage remains `partial`: these are named agencies/boards, not every municipality, school, authority, permit office, platform, or private project. See [`docs/NATIONAL_BID_COVERAGE_PLAN.md`](docs/NATIONAL_BID_COVERAGE_PLAN.md).
+The SAM.gov overlay provides a nationwide federal connection, not complete state or local coverage. State coverage remains `partial` where a named regional agency/board is connected and `identified` or `not-connected` elsewhere. These connections do not cover every municipality, school, authority, permit office, platform, or private project. See [`docs/NATIONAL_BID_COVERAGE_PLAN.md`](docs/NATIONAL_BID_COVERAGE_PLAN.md).
 
 ## Browser route and API map
 
@@ -214,14 +215,16 @@ backend/app/
   services/qualification.py global contact + Canopy admission rule
   services/canopy.py        deterministic scoring and profiles
   services/catalog*.py      S3/local snapshot loading, search, aggregation
-  services/northeast*.py    Northeast state and SAM.gov connectors
+  services/geography.py     canonical 50-state/D.C. code and name set
+  services/national.py      nationwide SAM fan-out and regional orchestration
+  services/northeast*.py    source-specific regional boards and SAM state adapter
   services/source_refresh.py partition-safe merge and coverage reconciliation
   services/state.py         DynamoDB/in-memory persistence and send locks
-  jobs/refresh_northeast.py scheduled Lambda entry point
+  jobs/refresh_national.py  scheduled Lambda entry point
 
 data-export/                deploy seed, registry, coverage and provenance
 infra/                      AWS CDK stack and context
-scripts/                    local regional refresh tooling
+scripts/                    local national refresh tooling
 docs/                       domain plans and operating documentation
 legacy/cloudflare/          archived prior runtime, excluded from deployment
 sam_dot_gov-main/           ignored reference application, excluded from Git/AWS assets
@@ -243,8 +246,9 @@ FastAPI Lambda
   +-- call Anthropic Messages API for reviewed email drafts
 
 EventBridge (daily 10:15 UTC)
-  -> Northeast refresh Lambda
+  -> National refresh Lambda
        +-- decrypt only SAM API key parameter
+       +-- isolate federal results by all 50 states and D.C.
        +-- read/write versioned catalog S3
 ```
 
@@ -291,10 +295,10 @@ Optional local source refresh:
 
 ```powershell
 $env:SAM_API_KEY = "<local key>"
-python scripts/refresh_northeast_snapshot.py
+python scripts/refresh_national_snapshot.py
 ```
 
-This modifies `data-export` and should be reviewed like any source-data change.
+The former Northeast script remains a compatibility alias. This command modifies `data-export` and should be reviewed like any source-data change.
 
 ## Verification and deployment
 
@@ -309,7 +313,7 @@ npm run deploy:aws
 Deployment builds React, bundles FastAPI for Python 3.12 x86-64, updates CloudFormation, uploads the frontend and catalog seed, and invalidates CloudFront for `index.html`. After deployment:
 
 1. verify `/health`, `/api/meta`, and `/api/auth/google/status`;
-2. invoke the regional refresh Lambda once and confirm `samConfigured: true`;
+2. invoke the national refresh Lambda once and confirm `samConfigured: true`, `scope: 50-states-and-dc`, and 51 expected federal partitions;
 3. verify every returned `/api/search` project has a published email or phone and score of at least 8;
 4. complete a Tudelu Google login and confirm Gmail history loads;
 5. confirm the default template does not require AI, then personalize an unsent draft and verify model metadata plus the fixed Tudelu signature;

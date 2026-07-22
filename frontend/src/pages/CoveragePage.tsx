@@ -83,6 +83,14 @@ export function CoveragePage() {
                 detail={`${formatCount(data.coverage.identifiedSourceGroups)} identified`}
               />
               <MetricCard
+                label="Federal states live"
+                value={`${formatCount(
+                  data.coverage.federalConnectedStates
+                    ?? data.coverage.states.filter((state) => state.federalProcurement === "partial").length,
+                )} / ${formatCount(data.coverage.federalExpectedStates ?? data.coverage.states.length)}`}
+                detail="SAM.gov partitions checked independently"
+              />
+              <MetricCard
                 label="Nationally complete"
                 value={data.coverage.nationallyComplete ? "Yes" : "No"}
                 detail="No overclaiming"
@@ -107,7 +115,7 @@ export function CoveragePage() {
               </div>
 
               <p className="results-toolbar" aria-live="polite">
-                <strong>{states.length}</strong> of {data.coverage.states.length} states shown
+                <strong>{states.length}</strong> of {data.coverage.states.length} states / D.C. shown
               </p>
 
               {states.length ? (

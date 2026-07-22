@@ -4,8 +4,7 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
-
-NORTHEAST_STATES = ("CT", "ME", "MA", "NH", "RI", "VT", "NY", "NJ", "PA")
+from .geography import NORTHEAST_STATES, US_STATES_AND_DC
 
 
 @dataclass(frozen=True)
@@ -113,6 +112,7 @@ NAICS_BOOSTS = {
 SEARCH_PROFILES = {
     profile.id: profile
     for profile in (
+        SearchProfile("direct_national", "Direct canopy - Nationwide", "High-fit canopy, awning, shelter, and covered-walkway work across all 50 states and D.C.", 8, US_STATES_AND_DC),
         SearchProfile("direct_northeast", "Direct canopy - Northeast", "High-fit canopy, awning, shelter, and covered-walkway work across the Northeast.", 8, NORTHEAST_STATES),
         SearchProfile("high_fit_canopy", "Highest canopy fit", "Direct architectural metal canopy and covered-walkway opportunities.", 12),
         SearchProfile("entrance_facade", "Entrance and facade", "Hidden canopy scope inside entrance, vestibule, facade, and exterior renovations.", 6),

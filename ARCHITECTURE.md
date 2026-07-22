@@ -27,7 +27,7 @@ Tudelu browser -> CloudFront -> API Gateway -> FastAPI Lambda
        v
 React authenticated SPA
 
-EventBridge -> Northeast refresh Lambda -> official sources + SAM.gov API
+EventBridge -> National refresh Lambda -> regional official sources + nationwide SAM.gov API
                                       -> versioned catalog S3
 ```
 
@@ -101,20 +101,20 @@ visible(project) = canopy_score(project) >= 8
 
 The dashboard recomputes visible total/stage/company inventory. `/api/coverage` intentionally returns the raw ingestion inventory to measure connectors. Search metadata exposes raw and qualified counts so the difference remains observable.
 
-## Regional source refresh
+## National source refresh
 
-EventBridge invokes `jobs/refresh_northeast.handler` daily. The orchestrator fetches source partitions concurrently through guarded HTTP adapters:
+EventBridge invokes `jobs/refresh_national.handler` daily. The orchestrator fetches source partitions concurrently through guarded HTTP adapters:
 
 - NJ DPMC and NJDOT;
 - NYDOT and MaineDOT;
 - CT/RI WebProcure public boards;
 - Massachusetts DCR and Pennsylvania DGS;
 - New Hampshire and Vermont DOT/ArcGIS services;
-- official SAM.gov Opportunities API searches for each Northeast state and each configured Canopy/proxy query.
+- official SAM.gov Opportunities API searches for all 50 states and D.C., with an independent state partition running each configured Canopy/proxy query.
 
 The SAM connector paginates with the official API’s documented maximum 1,000-record page for each state/query pair, up to a guarded five-page ceiling. It deduplicates notices returned by multiple queries, normalizes place of performance and `pointOfContact`, applies relevance scoring, and retains source links. It warns if a pair exceeds the guard rather than claiming completeness. The key permits the API’s documented keyed rate/usage path; it is not used to evade site access controls.
 
-The merge algorithm replaces only successful partitions. Failed partitions keep their last successful records and add warnings/degraded status. Aggregated inventory and coverage are recomputed after merge, then S3 receives a new object version. FastAPI request latency is independent of publisher availability.
+Six state workers bound the nationwide SAM fan-out. Notices returned by multiple queries are deduplicated within each state partition. The merge algorithm replaces only successful partitions. Failed partitions keep their last successful records and add warnings/degraded status. Aggregated inventory and coverage are recomputed after merge, then S3 receives a new object version. FastAPI request latency is independent of publisher availability.
 
 The CT/RI connector includes a narrowly scoped, checksum-pinned Thawte intermediate certificate because the publisher currently serves an incomplete chain. Hostname and certificate validation remain enabled. Reassess before the certificate expires on 2027-11-02.
 
@@ -201,8 +201,10 @@ The UI gate is a usability boundary; the FastAPI dependency is the authorization
 | `services/qualification.py` | global visibility and published contacts |
 | `services/catalog.py` | catalog admission, filters, sort, paging, aggregates |
 | `services/canopy.py` | deterministic fit model and profiles |
+| `services/geography.py` | canonical 50-state/D.C. partition set |
+| `services/national.py` | nationwide federal fan-out and regional orchestration |
 | `services/state.py` | DynamoDB/memory operations and conditional records |
-| `services/northeast*.py` | source-specific fetch/parse/normalize |
+| `services/northeast*.py` | source-specific regional and SAM-state fetch/parse/normalize |
 | `services/source_refresh.py` | partition-safe snapshot merge |
 
 The Google service deliberately uses Python’s standard HTTP library, keeping the Lambda runtime dependency set small. `boto3` is supplied by Lambda and imported lazily so local catalog work does not require AWS initialization.
@@ -224,7 +226,7 @@ The Google service deliberately uses Python’s standard HTTP library, keeping t
 
 ## Deployment and caching
 
-CDK bundles the Python API and refresh functions in the official Python 3.12 x86-64 build image. The API timeout stays below API Gateway’s response boundary; regional refresh has a five-minute timeout.
+CDK bundles the Python API and refresh functions in the official Python 3.12 x86-64 build image. The API timeout stays below API Gateway’s response boundary; the national refresh has 1,024 MB of memory and a 15-minute timeout for the bounded 51-partition fan-out.
 
 Frontend hashed assets are immutable for one year. `index.html` is no-store and CloudFront is invalidated on deployment. API behavior disables caching, which is required for cookies, auth status, drafts, and provider operations.
 

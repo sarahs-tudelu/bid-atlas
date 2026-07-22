@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import pytest
 from fastapi.testclient import TestClient
 
 import backend.app.api.outreach as outreach_api
@@ -16,7 +17,17 @@ from backend.app.services.qualification import (
 
 client = TestClient(app)
 TEST_USER = {"email": "outreach@tudelu.com", "name": "Outreach User", "picture": "", "gmailConnected": True}
-app.dependency_overrides[require_user] = lambda: TEST_USER
+
+
+@pytest.fixture(autouse=True)
+def authenticated_outreach_user():
+    previous = app.dependency_overrides.get(require_user)
+    app.dependency_overrides[require_user] = lambda: TEST_USER
+    yield
+    if previous is None:
+        app.dependency_overrides.pop(require_user, None)
+    else:
+        app.dependency_overrides[require_user] = previous
 
 
 def _fake_generated_draft(
@@ -75,12 +86,16 @@ def test_phone_only_project_is_contactable_without_becoming_emailable() -> None:
 def test_search_presets_and_profile_results_include_fit_evidence() -> None:
     presets = client.get("/api/search-presets")
     assert presets.status_code == 200
-    assert any(item["id"] == "direct_northeast" for item in presets.json()["presets"])
+    national = next(
+        item for item in presets.json()["presets"] if item["id"] == "direct_national"
+    )
+    assert len(national["states"]) == 51
+    assert "DC" in national["states"]
 
     response = client.get(
         "/api/search",
         params={
-            "profile": "direct_northeast",
+            "profile": "direct_national",
             "readiness": "all",
             "includeArchived": True,
             "limit": 50,

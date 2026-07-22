@@ -22,7 +22,7 @@ export function OutreachPage() {
   const [params, setParams] = useSearchParams();
   const projectId = params.get("project") ?? "";
   const candidates = useApi<SearchResponse>(`/api/search${queryString({
-    profile: "direct_northeast",
+    profile: "direct_national",
     readiness: "all",
     includeArchived: false,
     limit: 100,
@@ -252,7 +252,7 @@ export function OutreachPage() {
         <div className="empty-panel">
           <h2>Choose a contactable canopy opportunity</h2>
           <p>Every visible project has a published email or phone number and meets the Canopy fit threshold.</p>
-          <Link className="button button-primary" to="/projects?profile=direct_northeast">Find Northeast canopy work</Link>
+          <Link className="button button-primary" to="/projects?profile=direct_national">Find nationwide canopy work</Link>
         </div>
       ) : null}
 

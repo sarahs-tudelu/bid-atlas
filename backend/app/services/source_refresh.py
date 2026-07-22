@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Iterable, Protocol
 
+from .geography import STATE_CODE_BY_NAME
+
 
 class SourceResult(Protocol):
     source_id: str
@@ -27,18 +29,7 @@ def _clean_text(value: str) -> str:
 
 def _project_state(project: dict[str, Any]) -> str | None:
     state = str(project.get("state") or "").strip().upper()
-    aliases = {
-        "CONNECTICUT": "CT",
-        "MAINE": "ME",
-        "MASSACHUSETTS": "MA",
-        "NEW HAMPSHIRE": "NH",
-        "RHODE ISLAND": "RI",
-        "VERMONT": "VT",
-        "NEW YORK": "NY",
-        "NEW JERSEY": "NJ",
-        "PENNSYLVANIA": "PA",
-    }
-    return aliases.get(state, state or None)
+    return STATE_CODE_BY_NAME.get(state, state or None)
 
 
 def _project_timestamp(project: dict[str, Any]) -> float:
@@ -90,6 +81,7 @@ def refresh_aggregates(
     coverage["documentTextIndexedProjects"] = document_indexed
     coverage["connectedSourceGroups"] = sum(source.get("status") == "live" for source in sources)
     source_status = {str(source.get("id")): source.get("status") for source in sources}
+    federal_configured_states: set[str] = set()
     for state in coverage.get("states", []):
         code = str(state.get("code") or "").upper()
         state["loadedProjects"] = state_counts.get(code, 0)
@@ -109,6 +101,20 @@ def refresh_aggregates(
                 if any(source_status.get(source_id) == "live" for source_id in related_sources)
                 else "identified"
             )
+            if field == "federalProcurement":
+                federal_configured_states.add(code)
+        if code not in federal_configured_states:
+            state["federalProcurement"] = "not-connected"
+
+    state_rows = coverage.get("states", [])
+    coverage["statesAndDistrict"] = len(state_rows)
+    coverage["federalExpectedStates"] = len(federal_configured_states)
+    coverage["federalConnectedStates"] = sum(
+        state.get("federalProcurement") == "partial" for state in state_rows
+    )
+    coverage["identifiedSourceGroups"] = (
+        len(state_rows) * 2 + len(federal_configured_states)
+    )
 
 
 def merge_source_snapshot(

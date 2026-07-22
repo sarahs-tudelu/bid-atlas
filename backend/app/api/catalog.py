@@ -22,6 +22,9 @@ def meta(catalog: ProjectCatalog = Depends(get_catalog)) -> dict:
         "sourceProjectCount": catalog.source_project_count,
         "sourceCount": len(catalog.sources),
         "nationallyComplete": bool(catalog.coverage.get("nationallyComplete", False)),
+        "statesAndDistrict": int(catalog.coverage.get("statesAndDistrict", 0)),
+        "federalConnectedStates": int(catalog.coverage.get("federalConnectedStates", 0)),
+        "federalExpectedStates": int(catalog.coverage.get("federalExpectedStates", 0)),
     }
 
 

@@ -10,7 +10,8 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urljoin, urlparse
 from urllib.request import Request, urlopen
 
-from .canopy import NORTHEAST_STATES, score_project
+from .canopy import score_project
+from .geography import NORTHEAST_STATES
 from .new_jersey import (
     DPMC_SOURCE_ID,
     NJDOT_SOURCE_ID,
@@ -23,7 +24,7 @@ from .northeast_portals import (
     portal_source_ids,
     portal_warning_prefixes,
 )
-from .source_refresh import SourceRefreshResult
+from .source_refresh import SourceRefreshResult, SourceResult
 
 
 MAINE_DOT_SOURCE_ID = "maine-dot-current-construction-bids"
@@ -151,12 +152,12 @@ def fetch_official_html(url: str, timeout_seconds: int = 30) -> str:
     return payload.decode(charset, errors="replace")
 
 
-def _source_document(name: str, url: str) -> dict[str, str]:
+def _source_document(name: str, url: str, access: str = "public") -> dict[str, str]:
     return {
         "name": name,
         "kind": "solicitation",
         "url": url,
-        "access": "public",
+        "access": access,
         "indexStatus": "metadata-only",
     }
 
@@ -443,12 +444,17 @@ def _normalize_sam_project(record: dict[str, Any], state: str, checked_at: str) 
         "postedAt": posted.isoformat() if posted else None,
         "updatedAt": checked_at,
         "bidDate": deadline.isoformat() if deadline else None,
-        "bidDateTimeZone": "America/New_York",
         "sourceName": f"SAM.gov Canopy Opportunities - {state}",
         "sourceUrl": ui_link,
         "provenance": "live-public-api",
         "confidence": "official",
-        "documents": [_source_document(f"Official SAM.gov notice {solicitation}", ui_link)],
+        "documents": [
+            _source_document(
+                f"Official SAM.gov notice {solicitation}",
+                ui_link,
+                "free-account",
+            )
+        ],
         "participants": _sam_contact(record),
         "searchableFields": [
             solicitation,
@@ -555,10 +561,10 @@ def fetch_northeast_sources(
     fetch_json: Callable[[str], dict[str, Any]] = fetch_sam_json,
     today: date | None = None,
     fetched_at: str | None = None,
-) -> tuple[list[SourceRefreshResult | Any], list[str]]:
+) -> tuple[list[SourceResult], list[str]]:
     """Refresh every independent source without letting one portal stop the region."""
 
-    results: list[SourceRefreshResult | Any] = []
+    results: list[SourceResult] = []
     warnings: list[str] = []
     checked_at = fetched_at or datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 

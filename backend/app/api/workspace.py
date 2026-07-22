@@ -82,7 +82,7 @@ def integrations() -> dict[str, Any]:
                 "id": "sam",
                 "name": "SAM.gov",
                 "configured": sam_configured,
-                "detail": "Daily Northeast federal canopy discovery through the official opportunities API.",
+                "detail": "Daily federal canopy discovery across all 50 states and D.C. through the official opportunities API.",
             },
             {
                 "id": "anthropic",

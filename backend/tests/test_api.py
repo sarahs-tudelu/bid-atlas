@@ -24,6 +24,7 @@ def test_meta_exposes_fastapi_catalog() -> None:
     body = response.json()
     assert body["backend"] == "FastAPI"
     assert body["projectCount"] > 0
+    assert body["statesAndDistrict"] == 51
 
 
 def test_bid_search_returns_only_qualified_bids() -> None:
