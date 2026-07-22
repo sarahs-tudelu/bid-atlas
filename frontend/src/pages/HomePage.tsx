@@ -46,7 +46,7 @@ export function HomePage() {
                 <span className="live-dot" /> AWS snapshot
               </div>
               <strong>{formatCount(data.inventory.totalProjects)}</strong>
-              <p>connected project records</p>
+              <p>contactable Canopy opportunities</p>
               <dl>
                 <div>
                   <dt>Sources</dt>
@@ -83,7 +83,7 @@ export function HomePage() {
               <MetricCard
                 label="Open bidding records"
                 value={formatCount(stageCounts.bidding ?? 0)}
-                detail="Published bidding stage"
+                detail="Qualified with published contact"
               />
               <MetricCard label="Early-stage leads" value={formatCount(earlyStage)} detail="Planning through permitting" />
               <MetricCard

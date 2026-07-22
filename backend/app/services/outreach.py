@@ -1,31 +1,9 @@
 from __future__ import annotations
 
-import re
 from typing import Any
 
 from .canopy import score_project
-
-
-EMAIL = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
-
-
-def published_contacts(project: dict[str, Any]) -> list[dict[str, str]]:
-    contacts: list[dict[str, str]] = []
-    seen: set[str] = set()
-    for participant in project.get("participants", []):
-        email = str(participant.get("email") or "").strip().lower()
-        if not EMAIL.fullmatch(email) or email in seen:
-            continue
-        seen.add(email)
-        contacts.append(
-            {
-                "name": str(participant.get("name") or participant.get("organization") or "").strip(),
-                "email": email,
-                "phone": str(participant.get("phone") or "").strip(),
-                "role": str(participant.get("role") or "published contact").strip(),
-            }
-        )
-    return contacts
+from .qualification import EMAIL, published_contacts
 
 
 def generate_outreach_draft(project: dict[str, Any]) -> dict[str, Any]:
@@ -71,6 +49,8 @@ def validate_draft(value: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("A valid recipient email is required")
     if not subject or len(subject) > 300:
         raise ValueError("Subject is required and must be 300 characters or fewer")
+    if "\r" in subject or "\n" in subject:
+        raise ValueError("Subject cannot contain line breaks")
     if not body or len(body) > 10_000:
         raise ValueError("Body is required and must be 10,000 characters or fewer")
     return {**value, "projectId": project_id, "to": recipient, "subject": subject, "body": body}

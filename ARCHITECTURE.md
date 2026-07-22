@@ -1,121 +1,226 @@
 # BidAtlas architecture
 
-## Design goals
+This document describes the active React/FastAPI/AWS implementation. The complete operator and user workflow is in [`README.md`](README.md); source expansion policy is in [`docs/NATIONAL_BID_COVERAGE_PLAN.md`](docs/NATIONAL_BID_COVERAGE_PLAN.md).
 
-1. Keep the browser application static, typed, accessible, and same-origin with its API.
-2. Keep HTTP concerns in thin FastAPI routers and domain behavior in testable services.
-3. Keep project search read-only and snapshot-backed so upstream portal latency never affects a user request.
-4. Preserve source evidence, distinguish partial coverage from completeness, and retain the last good partition on connector failure.
-5. Keep mutable workspace data low-risk until real authentication and authorization are added.
-6. Keep the AWS footprint isolated, encrypted, low-cost, and reproducible with CDK.
+> Architecture changes are incomplete until this document, the README, relevant domain docs, tests, and deployment configuration agree.
 
-## Runtime request flow
+## Design objectives
 
-```text
-Browser
-  |
-  v
-CloudFront
-  +-- frontend route/static asset --> private frontend S3 bucket
-  |                                  +-- no-cache index.html
-  |                                  +-- immutable hashed assets
-  |
-  +-- /api/* or /health --> API Gateway HTTP API --> FastAPI Lambda
-                                                   +-- catalog router
-                                                   +-- outreach router
-                                                   +-- workspace router
-                                                         |
-                               +-------------------------+--------------------+
-                               v                                              v
-                    private versioned catalog S3                    DynamoDB workspace table
-                    (read-only to the API)                          (drafts, outreach, monitors)
-```
+1. Show actionable Canopy opportunities rather than a noisy construction dump.
+2. Preserve a verifiable official-source trail and honest coverage reporting.
+3. Authenticate internal work with a verified Tudelu identity.
+4. Send only reviewed messages from the signed-in user’s Gmail account.
+5. Make arbitrary-recipient relay, duplicate sending, and cross-user workspace access impossible through the normal API contract.
+6. Keep runtime secrets out of Git, Lambda environment values, frontend bundles, logs, and CloudFormation templates.
+7. Keep one independently deployable AWS serverless stack.
 
-The API begins with the packaged `data-export` snapshot. `ProjectCatalogProvider` checks the private S3 object version at a bounded five-minute cadence and swaps in a newly parsed immutable catalog only when the object changes. Searches never call a procurement portal.
-
-## Scheduled ingestion flow
+## System context
 
 ```text
-EventBridge daily rule
-  -> Northeast refresh Lambda
-       -> fixed source adapters run independently
-       -> source response host/size/page guards
-       -> source-specific normalization
-       -> deterministic canopy qualification where the source is broad
-       -> optional SAM.gov state/query fan-out using an SSM SecureString
-       -> replace successful partitions only
-       -> retain failed partitions and mark their source degraded
-       -> recompute inventory and coverage
-       -> write a new version of current-projects.json to catalog S3
+                         Google OAuth / Gmail API
+                                  ^
+                                  |
+Tudelu browser -> CloudFront -> API Gateway -> FastAPI Lambda
+       |              |                              |
+       |              +-> private frontend S3       +-> DynamoDB workspace
+       |                                             +-> private catalog S3
+       v
+React authenticated SPA
+
+EventBridge -> Northeast refresh Lambda -> official sources + SAM.gov API
+                                      -> versioned catalog S3
 ```
 
-The active scheduled adapters cover:
+CloudFront makes the frontend and API same-origin. The default behavior serves the SPA from private S3 through Origin Access Control. `/api/*` and `/health` use a caching-disabled API Gateway origin and forward viewer cookies. Extensionless SPA rewriting is attached only to the frontend behavior, so API callbacks are never rewritten to `index.html`.
 
-- NJ DPMC and NJDOT public construction pages;
-- MaineDOT and NYSDOT current construction pages;
-- Connecticut CTsource and Rhode Island RIDOT public WebProcure boards;
-- Massachusetts DCR and Pennsylvania DGS current construction listings;
-- NHDOT and VTrans official ArcGIS project services;
-- optional SAM.gov active federal notices by Northeast place of performance.
+## Trust boundaries
 
-The WebProcure adapter uses normal hostname and certificate verification plus a checksum-pinned DigiCert `Thawte TLS RSA CA G1` intermediate for that host because the publisher currently omits the intermediate from its server chain. This host-specific trust-chain completion must be removed when the publisher repairs its TLS configuration or reviewed before the intermediate expires on November 2, 2027. Disabling TLS verification is not an accepted fallback.
+### Public boundary
 
-Each source declares its state and coverage class. A live source can be partial even when it currently yields zero qualified records. No adapter marks a state complete.
+Health, catalog, search, coverage, source-registry, company, document, and OAuth-start endpoints are public HTTP APIs. Catalog responses have already passed the global qualification gate. Coverage aggregates may describe nonqualified raw records but do not expose those records through project lookup.
 
-## Frontend boundaries
+### Authenticated workspace boundary
 
-`frontend/src/App.tsx` owns the route table. Route pages compose shared components and call `apiRequest` or `useApi`; they do not know where FastAPI runs. Local Vite proxying and CloudFront path routing keep the contract same-origin.
+Bid drafts, source monitors, outreach drafts/history, Gmail history, and sending depend on `require_user`. The dependency validates an HMAC-signed, expiring HttpOnly cookie and then confirms that the email still has a Google account record in DynamoDB. The browser no longer supplies an identity header.
 
-`ProjectResultsPage` treats URL query parameters as search state. Search profiles come from `/api/search-presets`, and cards display deterministic canopy-fit evidence returned with each project. `OutreachPage` owns project selection, editable message state, email-client handoff, and draft/sent history.
+Every mutable record is partitioned by the normalized verified Google email. User input cannot select another owner partition.
 
-Browser contracts live in `frontend/src/types.ts`. Shared formatting, query serialization, loading/error states, responsive navigation, theme state, and feedback components remain outside route pages.
+### Google provider boundary
 
-## Backend boundaries
+The API Lambda alone can decrypt OAuth client credentials. OAuth uses:
 
-- `backend/app/main.py` creates middleware, routers, health, OpenAPI, and the Mangum Lambda adapter.
-- `api/catalog.py` validates read-only catalog/search input.
-- `api/outreach.py` validates draft generation, editing, and explicit sent markers.
-- `api/workspace.py` handles bid drafts, source monitors, and integration status.
-- `services/catalog.py` loads, filters, scores, sorts, and pages one immutable snapshot.
-- `services/canopy.py` owns deterministic scoring patterns and reusable search profiles.
-- `services/outreach.py` selects published contacts and creates the default message without a network or LLM dependency.
-- `services/source_refresh.py` owns partition replacement, degraded-source retention, and aggregate reconciliation.
-- `services/northeast*.py` own source-specific guarded fetching and normalization.
-- `services/state.py` owns DynamoDB/in-memory workspace persistence.
+- cryptographically random state;
+- a state-bound PKCE verifier/challenge;
+- an exact redirect URI;
+- `access_type=offline` and explicit consent;
+- verified Google user information;
+- an exact `@tudelu.com` admission check.
 
-## Persistence
+The state cookie lasts 10 minutes. The application session lasts 12 hours and is HttpOnly, Secure in production, and SameSite=Lax. Provider access tokens are refreshed server-side and never returned to React.
 
-The checked-in snapshot is both deployment seed and failure fallback. The private versioned catalog bucket is the current runtime source. FastAPI has read-only catalog access; only the refresh Lambda writes the current catalog.
+Gmail access is restricted to the configured `gmail.readonly` and `gmail.send` scopes. History normalization discards bodies and stores only headers, short snippets, and provider IDs. Sending uses `users/me/messages/send`, so the authenticated mailbox is the sender.
 
-DynamoDB uses this device-workspace layout:
+### AWS secret boundary
+
+Parameter Store contains four SecureStrings. Lambda environment variables contain only their names. IAM resources are exact parameter ARNs:
+
+| Consumer | Parameters |
+| --- | --- |
+| API Lambda | Google client ID, Google client secret, session secret |
+| Refresh Lambda | SAM.gov API key |
+
+The Google client ID is not intrinsically confidential, but it follows the same promotion and configuration workflow to avoid coupling deployment to a local ignored file.
+
+## Catalog pipeline
+
+The checked-in `data-export/current-projects.json` is a reproducible deployment seed and Lambda fallback. Production’s current catalog is the private versioned S3 object.
+
+`ProjectCatalogProvider`:
+
+1. constructs a catalog from the packaged snapshot;
+2. checks the S3 ETag no more than once per configured refresh interval;
+3. downloads a changed object under a strict byte limit;
+4. atomically replaces the in-memory immutable catalog;
+5. retains the current catalog if S3 is unavailable or invalid.
+
+`ProjectCatalog` repairs known legacy text encoding, records the raw snapshot count, applies the visibility admission gate once during initialization, builds exact-ID indexes only from admitted projects, and then serves all list/search/aggregation operations from that admitted list.
+
+### Qualification invariant
 
 ```text
-owner                              recordKey                 payload
-<device-id>@device.bidatlas        draft#<project-id>        JSON bid draft
-<device-id>@device.bidatlas        outreach#<project-id>     JSON draft/sent outreach record
-<device-id>@device.bidatlas        monitor#<uuid>            JSON source monitor
+visible(project) = canopy_score(project) >= 8
+                   AND count(valid_source_published_email(project)) > 0
 ```
 
-The browser supplies a random local-storage identifier through `X-BidAtlas-User`. This prevents accidental device-workspace mixing but is not authentication. Workspace records must not contain confidential bids, credentials, or sensitive personal data.
+`services/qualification.py` owns this invariant. No route should duplicate or weaken it. A new catalog surface must operate on `ProjectCatalog.projects` or explicitly call the same predicate.
 
-The documents bucket is provisioned for future protected ingestion. The active UI links official source documents and does not upload or proxy document bytes.
+The dashboard recomputes visible total/stage/company inventory. `/api/coverage` intentionally returns the raw ingestion inventory to measure connectors. Search metadata exposes raw and qualified counts so the difference remains observable.
 
-## Outreach security boundary
+## Regional source refresh
 
-Draft generation uses only the project record and source-published contacts. It is deterministic, editable, and persisted per device workspace. **Open in email client** uses `mailto:` after saving; the backend does not send email. **Mark sent** is a separate explicit action and is not inferred from opening the client.
+EventBridge invokes `jobs/refresh_northeast.handler` daily. The orchestrator fetches source partitions concurrently through guarded HTTP adapters:
 
-Server-side Gmail, SMTP, or SES delivery must not be added until BidAtlas has authenticated users, per-user provider authorization, abuse/rate controls, audit logs, revocation, and an endpoint-specific threat review. The current public device header cannot authorize a mail sender.
+- NJ DPMC and NJDOT;
+- NYDOT and MaineDOT;
+- CT/RI WebProcure public boards;
+- Massachusetts DCR and Pennsylvania DGS;
+- New Hampshire and Vermont DOT/ArcGIS services;
+- official SAM.gov Opportunities API searches for each Northeast state and each configured Canopy/proxy query.
 
-## Deployment
+The SAM connector paginates with the official API’s documented maximum 1,000-record page for each state/query pair, up to a guarded five-page ceiling. It deduplicates notices returned by multiple queries, normalizes place of performance and `pointOfContact`, applies relevance scoring, and retains source links. It warns if a pair exceeds the guard rather than claiming completeness. The key permits the API’s documented keyed rate/usage path; it is not used to evade site access controls.
 
-CDK bundles Python dependencies in the official Python 3.12 Lambda build image. Lambda uses x86-64 to match compiled wheels. Vite content-hashes frontend assets; CDK uploads them to private S3 and waits for CloudFront invalidation.
+The merge algorithm replaces only successful partitions. Failed partitions keep their last successful records and add warnings/degraded status. Aggregated inventory and coverage are recomputed after merge, then S3 receives a new object version. FastAPI request latency is independent of publisher availability.
 
-The regional refresh Lambda has catalog read/write access. When `samApiKeyParameterName` is supplied as CDK context, it receives `ssm:GetParameter` only for that parameter ARN and reads the SecureString at runtime. The key is never placed in Lambda environment variables or CloudFormation.
+The CT/RI connector includes a narrowly scoped, checksum-pinned Thawte intermediate certificate because the publisher currently serves an incomplete chain. Hostname and certificate validation remain enabled. Reassess before the certificate expires on 2027-11-02.
 
-All resources belong to `BidAtlasStack`; no Canopy or Tudelu stack resource is imported or modified.
+## Outreach sequence
 
-## Legacy and reference boundaries
+```text
+React             FastAPI              DynamoDB             Gmail
+  | generate         |                     |                   |
+  |----------------->| load admitted       |                   |
+  |                  | project/account --->|                   |
+  |                  | list messages/threads ----------------->|
+  |                  | normalize metadata <--------------------|
+  |                  | store draft/history ->|                 |
+  |<-----------------|                     |                   |
+  | edit + save      |                     |                   |
+  |----------------->| revalidate recipient|                   |
+  |                  | store draft ------->|                   |
+  |<-----------------|                     |                   |
+  | confirm + send   |                     |                   |
+  |----------------->| revalidate all      |                   |
+  |                  | conditional lock -->|                   |
+  |                  | users/me/send ------------------------->|
+  |                  | provider IDs <--------------------------|
+  |                  | sent audit + unlock>|                   |
+  |<-----------------|                     |                   |
+```
 
-`legacy/cloudflare` contains the former Next/Vinext routes, D1/R2 code, connector runtime, ingestion Worker, scripts, and tests. It is excluded from active package scripts and AWS assets.
+The draft payload is never trusted as recipient authority. Save and send reload the current admitted project and compare the normalized `to` address with its published contacts. Subject line breaks are rejected. The send path refuses an existing sent record and acquires an atomic `put_if_absent` record before contacting Gmail. The lock is removed in a `finally` block after success or provider failure.
 
-The local `sam_dot_gov-main` folder was used only as a feature-design reference for scoring, presets, contacts, editable drafts, and sent history. It is ignored by Git and excluded from every runtime artifact. Reusable behavior was reimplemented within the active React/FastAPI architecture and its current security boundary.
+Generating or saving is not evidence of delivery. Only a successful Gmail API response creates sent status. Stored provider IDs support later reconciliation without retaining a raw RFC 2822 message.
+
+## Persistence model
+
+The DynamoDB table uses `owner` as partition key and `recordKey` as sort key. Payloads are compact JSON strings with `updatedAt` duplicated as a top-level attribute.
+
+| Record key | Contents | Sensitivity |
+| --- | --- | --- |
+| `google#account` | identity, access/refresh tokens, scopes, expiry | Provider credential; backend-only |
+| `draft#<project>` | bid-desk fields | Internal business data |
+| `outreach#<project>` | draft, contacts, snippets, status, Gmail IDs | Internal communication audit |
+| `gmail-send-lock#<project>` | transient send coordination | Operational |
+| `monitor#<uuid>` | proposed source URL/status | Internal workflow |
+
+Production uses on-demand capacity, AWS-managed encryption, point-in-time recovery, and a retain removal policy. Local development/tests use a process-local dictionary with equivalent owner/key behavior.
+
+The documents S3 bucket is an encrypted, versioned, retained boundary for future protected content. The current UI deep-links to official documents and does not proxy or copy them.
+
+## Frontend composition
+
+`App` owns the `AuthProvider` and authenticated route gate. On startup, `useAuth` requests `/api/auth/me`; only a resolved user mounts route pages, preventing authenticated page hooks from racing ahead of session resolution.
+
+`apiRequest` is same-origin by default, always includes browser credentials, adds JSON headers when needed, normalizes FastAPI errors, and handles 204 responses. It carries no browser-generated identity.
+
+`AppShell` shows the current email and sign-out. Search pages use URL query parameters as shareable state. `OutreachPage` keeps selected-project draft state isolated, renders provider metadata, restricts recipients to a source-backed select, requires browser confirmation, and disables mutations after sent status.
+
+The UI gate is a usability boundary; the FastAPI dependency is the authorization boundary.
+
+## Backend composition
+
+| Module | Responsibility |
+| --- | --- |
+| `main.py` | app, middleware, routers, health, Mangum |
+| `config.py` | environment-derived immutable settings |
+| `dependencies.py` | cached catalog/store construction |
+| `api/auth.py` | OAuth/session HTTP contract and `require_user` |
+| `api/catalog.py` | public validation and discovery contract |
+| `api/workspace.py` | authenticated drafts/monitors; safe integration status |
+| `api/outreach.py` | authenticated generate/history/save/send orchestration |
+| `services/auth.py` | identity predicate and purpose-bound signed payloads |
+| `services/google.py` | Google HTTP/OAuth/token/Gmail client |
+| `services/runtime_secrets.py` | lazy cached SSM decryption |
+| `services/qualification.py` | global visibility and published contacts |
+| `services/catalog.py` | catalog admission, filters, sort, paging, aggregates |
+| `services/canopy.py` | deterministic fit model and profiles |
+| `services/state.py` | DynamoDB/memory operations and conditional records |
+| `services/northeast*.py` | source-specific fetch/parse/normalize |
+| `services/source_refresh.py` | partition-safe snapshot merge |
+
+The Google service deliberately uses Python’s standard HTTP library, keeping the Lambda runtime dependency set small. `boto3` is supplied by Lambda and imported lazily so local catalog work does not require AWS initialization.
+
+## Failure behavior
+
+- Invalid/expired session: `401`; React returns to login on the next full load.
+- Missing production secrets: auth status reports unconfigured and OAuth start returns `503`.
+- OAuth state/domain failure: callback refuses the login without creating an account/session.
+- Revoked/missing refresh token: Gmail operation returns a reconnect error; no sent record is written.
+- Gmail provider/network failure: `502`; send lock is released; draft remains unsent.
+- Concurrent send: `409`; second request does not contact Gmail.
+- Previously sent draft mutation/resend: `409`.
+- Catalog S3 failure: API serves its last valid in-memory or packaged catalog.
+- One connector failure: old source partition remains and warning/status becomes degraded.
+- All connector failures: refresh Lambda fails rather than writing an empty snapshot.
+
+## Deployment and caching
+
+CDK bundles the Python API and refresh functions in the official Python 3.12 x86-64 build image. The API timeout stays below API Gateway’s response boundary; regional refresh has a five-minute timeout.
+
+Frontend hashed assets are immutable for one year. `index.html` is no-store and CloudFront is invalidated on deployment. API behavior disables caching, which is required for cookies, auth status, drafts, and provider operations.
+
+Resources are tagged `Project=BidAtlas`. The stack does not import or mutate the old SAM reference application’s EC2, SQLite, DynamoDB, S3, tokens, or deployment resources.
+
+## Verification expectations
+
+Every release runs:
+
+- ESLint for React/TypeScript;
+- TypeScript no-emit checking for CDK;
+- Ruff for backend and tests;
+- Vitest/Testing Library;
+- Pytest/FastAPI TestClient, including qualification, exact-domain auth, signed-token tamper/expiry, connector parsing, source merging, published-recipient enforcement, and Gmail send audit behavior;
+- Vite production build;
+- CDK synth before deploy.
+
+Production smoke checks must not send real mail unless a human has selected a controlled project and recipient.

@@ -201,6 +201,7 @@ def test_sam_state_connector_deduplicates_queries_and_keeps_published_contact() 
     def fake_fetch(url: str) -> dict:
         query = parse_qs(urlparse(url).query)
         state = query["state"][0]
+        assert query["limit"] == ["1000"]
         return {
             "totalRecords": 1,
             "opportunitiesData": [
@@ -244,6 +245,45 @@ def test_sam_state_connector_deduplicates_queries_and_keeps_published_contact() 
     assert len(result.projects) == 1
     assert result.projects[0]["participants"][0]["email"] == "pat@example.gov"
     assert result.projects[0]["sourceUrl"].startswith("https://sam.gov/")
+
+
+def test_sam_state_connector_follows_documented_pagination() -> None:
+    offsets: list[int] = []
+
+    def fake_fetch(url: str) -> dict:
+        query = parse_qs(urlparse(url).query)
+        offset = int(query["offset"][0])
+        offsets.append(offset)
+        return {
+            "totalRecords": 1001,
+            "opportunitiesData": [
+                {
+                    "noticeId": f"{query['title'][0]}-{offset}",
+                    "title": "Architectural metal canopy replacement",
+                    "solicitationNumber": f"SOL-{offset}",
+                    "type": "Solicitation",
+                    "postedDate": "2026-07-01",
+                    "responseDeadLine": "2026-08-15T17:00:00-04:00",
+                    "placeOfPerformance": {"state": {"code": "CT"}},
+                    "pointOfContact": [{"email": "pat@example.gov"}],
+                    "uiLink": f"https://sam.gov/opp/{offset}/view",
+                }
+            ],
+        }
+
+    result, warnings = fetch_sam_state(
+        "CT",
+        "key",
+        fake_fetch,
+        today=date(2026, 7, 22),
+        fetched_at="2026-07-22T12:00:00Z",
+    )
+
+    assert warnings == []
+    assert result is not None
+    assert len(result.projects) == 14
+    assert offsets.count(0) == 7
+    assert offsets.count(1000) == 7
 
 
 def test_regional_merge_marks_connected_federal_partition_as_partial() -> None:

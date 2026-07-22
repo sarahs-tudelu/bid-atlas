@@ -1,6 +1,12 @@
 from fastapi.testclient import TestClient
 
+from backend.app.api.auth import require_user
 from backend.app.main import app
+from backend.app.services.qualification import is_contactable_canopy_project
+
+
+TEST_USER = {"email": "tester@tudelu.com", "name": "Test User", "picture": "", "gmailConnected": True}
+app.dependency_overrides[require_user] = lambda: TEST_USER
 
 
 client = TestClient(app)
@@ -52,8 +58,9 @@ def test_new_jersey_catalog_is_connected_and_searchable() -> None:
     )
     assert search_response.status_code == 200
     body = search_response.json()
-    assert body["meta"]["matchedProjects"] == new_jersey["loadedProjects"]
+    assert body["meta"]["matchedProjects"] <= new_jersey["loadedProjects"]
     assert all(project["state"] == "NJ" for project in body["projects"])
+    assert all(is_contactable_canopy_project(project) for project in body["projects"])
 
 
 def test_workspace_draft_round_trip() -> None:

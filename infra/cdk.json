@@ -4,6 +4,11 @@
   "context": {
     "@aws-cdk/core:bootstrapQualifier": "canopy",
     "@aws-cdk/aws-s3:serverAccessLogsUseBucketPolicy": true,
-    "@aws-cdk/aws-cloudfront:defaultSecurityPolicyTLSv1.2_2021": true
+    "@aws-cdk/aws-cloudfront:defaultSecurityPolicyTLSv1.2_2021": true,
+    "publicUrl": "https://d9ubnak81sn3g.cloudfront.net",
+    "samApiKeyParameterName": "/BidAtlas/sam-api-key",
+    "googleClientIdParameterName": "/BidAtlas/google-client-id",
+    "googleClientSecretParameterName": "/BidAtlas/google-client-secret",
+    "sessionSecretParameterName": "/BidAtlas/session-secret"
   }
 }

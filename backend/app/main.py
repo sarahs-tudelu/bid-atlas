@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from mangum import Mangum
 
 from .api.catalog import router as catalog_router
+from .api.auth import router as auth_router
 from .api.outreach import router as outreach_router
 from .api.workspace import router as workspace_router
 from .config import settings
@@ -20,10 +21,11 @@ def create_app() -> FastAPI:
     app.add_middleware(
         CORSMiddleware,
         allow_origins=list(settings.cors_origins),
-        allow_credentials=False,
+        allow_credentials=True,
         allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-        allow_headers=["content-type", "x-bidatlas-user"],
+        allow_headers=["accept", "content-type"],
     )
+    app.include_router(auth_router)
     app.include_router(catalog_router)
     app.include_router(outreach_router)
     app.include_router(workspace_router)

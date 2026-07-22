@@ -8,9 +8,11 @@ from pydantic import BaseModel, Field
 
 from ..dependencies import get_catalog, get_workspace_store
 from ..services.catalog import ProjectCatalog
+from ..services.google import GoogleApiError, gmail_history, send_gmail_message
 from ..services.outreach import generate_outreach_draft, validate_draft
+from ..services.qualification import published_contacts
 from ..services.state import WorkspaceStore
-from .workspace import workspace_owner
+from .auth import require_user
 
 
 router = APIRouter(prefix="/api/outreach", tags=["outreach"])
@@ -32,78 +34,169 @@ class DraftRequest(BaseModel):
 def _project_or_404(project_id: str, catalog: ProjectCatalog) -> dict[str, Any]:
     project = catalog.project(project_id)
     if project is None:
-        raise HTTPException(status_code=404, detail="Project not found")
+        raise HTTPException(status_code=404, detail="Qualified project not found")
     return project
+
+
+def _google_account(owner: str, store: WorkspaceStore) -> dict[str, Any]:
+    account = store.get(owner, "google#account")
+    if not account:
+        raise HTTPException(status_code=401, detail="Reconnect your Tudelu Google account")
+    return account
+
+
+def _validate_published_recipient(draft: dict[str, Any], project: dict[str, Any]) -> None:
+    published = {contact["email"] for contact in published_contacts(project)}
+    if draft["to"] not in published:
+        raise HTTPException(
+            status_code=400,
+            detail="Recipient must be an email address published with this project",
+        )
+
+
+def _sync_history(
+    owner: str,
+    project: dict[str, Any],
+    store: WorkspaceStore,
+) -> list[dict[str, Any]]:
+    try:
+        return gmail_history(
+            owner,
+            _google_account(owner, store),
+            store,
+            [contact["email"] for contact in published_contacts(project)],
+        )
+    except GoogleApiError as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
 
 
 @router.get("/draft")
 def get_draft(
     project_id: str = Query(alias="projectId", min_length=1, max_length=300),
-    owner: str = Depends(workspace_owner),
+    user: dict[str, Any] = Depends(require_user),
     store: WorkspaceStore = Depends(get_workspace_store),
 ) -> dict[str, Any]:
-    return {"draft": store.get(owner, f"outreach#{project_id}")}
+    return {"draft": store.get(user["email"], f"outreach#{project_id}")}
 
 
 @router.post("/generate")
 def generate(
     payload: GenerateRequest,
-    owner: str = Depends(workspace_owner),
+    user: dict[str, Any] = Depends(require_user),
     store: WorkspaceStore = Depends(get_workspace_store),
     catalog: ProjectCatalog = Depends(get_catalog),
 ) -> dict[str, Any]:
+    owner = user["email"]
     existing = store.get(owner, f"outreach#{payload.projectId}")
+    if existing is not None and existing.get("status") == "sent":
+        raise HTTPException(status_code=409, detail="Sent outreach cannot be regenerated")
     if existing is not None and not payload.regenerate:
         return {"draft": existing, "reused": True}
     project = _project_or_404(payload.projectId, catalog)
-    draft = store.put(owner, f"outreach#{payload.projectId}", generate_outreach_draft(project))
-    return {"draft": draft, "reused": False}
+    history = _sync_history(owner, project, store)
+    draft = generate_outreach_draft(project)
+    draft["emailHistory"] = history
+    draft["historySyncedAt"] = datetime.now(timezone.utc).isoformat()
+    stored = store.put(owner, f"outreach#{payload.projectId}", draft)
+    return {"draft": stored, "reused": False}
+
+
+@router.post("/gmail-history")
+def refresh_gmail_history(
+    payload: GenerateRequest,
+    user: dict[str, Any] = Depends(require_user),
+    store: WorkspaceStore = Depends(get_workspace_store),
+    catalog: ProjectCatalog = Depends(get_catalog),
+) -> dict[str, Any]:
+    owner = user["email"]
+    project = _project_or_404(payload.projectId, catalog)
+    existing = store.get(owner, f"outreach#{payload.projectId}") or generate_outreach_draft(project)
+    stored = store.put(
+        owner,
+        f"outreach#{payload.projectId}",
+        {
+            **existing,
+            "emailHistory": _sync_history(owner, project, store),
+            "historySyncedAt": datetime.now(timezone.utc).isoformat(),
+        },
+    )
+    return {"draft": stored}
 
 
 @router.put("/draft")
 def save_draft(
     payload: DraftRequest,
-    owner: str = Depends(workspace_owner),
+    user: dict[str, Any] = Depends(require_user),
     store: WorkspaceStore = Depends(get_workspace_store),
     catalog: ProjectCatalog = Depends(get_catalog),
 ) -> dict[str, Any]:
+    owner = user["email"]
     project = _project_or_404(payload.projectId, catalog)
     existing = store.get(owner, f"outreach#{payload.projectId}") or generate_outreach_draft(project)
+    if existing.get("status") == "sent":
+        raise HTTPException(status_code=409, detail="Sent outreach cannot be edited")
     try:
         draft = validate_draft({**existing, **payload.model_dump(), "status": "draft"})
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
+    _validate_published_recipient(draft, project)
     return {"draft": store.put(owner, f"outreach#{payload.projectId}", draft)}
 
 
-@router.post("/mark-sent")
-def mark_sent(
+@router.post("/send")
+def send(
     payload: DraftRequest,
-    owner: str = Depends(workspace_owner),
+    user: dict[str, Any] = Depends(require_user),
     store: WorkspaceStore = Depends(get_workspace_store),
     catalog: ProjectCatalog = Depends(get_catalog),
 ) -> dict[str, Any]:
-    _project_or_404(payload.projectId, catalog)
+    owner = user["email"]
+    project = _project_or_404(payload.projectId, catalog)
+    existing = store.get(owner, f"outreach#{payload.projectId}")
+    if existing and existing.get("status") == "sent":
+        raise HTTPException(status_code=409, detail="This outreach message is already marked sent")
     try:
-        draft = validate_draft(payload.model_dump())
+        draft = validate_draft({**(existing or {}), **payload.model_dump()})
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
-    if not draft["to"]:
-        raise HTTPException(status_code=400, detail="Recipient email is required before marking outreach sent")
-    sent_at = datetime.now(timezone.utc).isoformat()
-    stored = store.put(
-        owner,
-        f"outreach#{payload.projectId}",
-        {**draft, "status": "sent", "sentAt": sent_at},
-    )
-    return {"draft": stored}
+    _validate_published_recipient(draft, project)
+
+    lock_key = f"gmail-send-lock#{payload.projectId}"
+    if not store.put_if_absent(owner, lock_key, {"projectId": payload.projectId}):
+        raise HTTPException(status_code=409, detail="This message is already being sent")
+    try:
+        gmail = send_gmail_message(
+            owner,
+            _google_account(owner, store),
+            store,
+            recipient=draft["to"],
+            subject=draft["subject"],
+            body=draft["body"],
+        )
+        sent = store.put(
+            owner,
+            f"outreach#{payload.projectId}",
+            {
+                **draft,
+                "status": "sent",
+                "sentAt": datetime.now(timezone.utc).isoformat(),
+                "sentBy": owner,
+                "gmailMessageId": gmail["messageId"],
+                "gmailThreadId": gmail["threadId"],
+            },
+        )
+    except GoogleApiError as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
+    finally:
+        store.delete(owner, lock_key)
+    return {"draft": sent}
 
 
 @router.get("/history")
 def history(
-    owner: str = Depends(workspace_owner),
+    user: dict[str, Any] = Depends(require_user),
     store: WorkspaceStore = Depends(get_workspace_store),
 ) -> dict[str, Any]:
-    records = store.list_prefix(owner, "outreach#")
+    records = store.list_prefix(user["email"], "outreach#")
     records.sort(key=lambda item: str(item.get("sentAt") or item.get("updatedAt") or ""), reverse=True)
     return {"history": records}

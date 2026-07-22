@@ -19,6 +19,7 @@ def meta(catalog: ProjectCatalog = Depends(get_catalog)) -> dict:
         "backend": "FastAPI",
         "generatedAt": catalog.generated_at,
         "projectCount": len(catalog.projects),
+        "sourceProjectCount": catalog.source_project_count,
         "sourceCount": len(catalog.sources),
         "nationallyComplete": bool(catalog.coverage.get("nationallyComplete", False)),
     }

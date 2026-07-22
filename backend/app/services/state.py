@@ -51,6 +51,45 @@ class WorkspaceStore:
                 self._memory[(owner, record_key)] = stored
         return stored
 
+    def put_if_absent(self, owner: str, record_key: str, payload: dict[str, Any]) -> bool:
+        """Create a short-lived coordination record without overwriting an existing one."""
+
+        stored = {**payload, "updatedAt": datetime.now(timezone.utc).isoformat()}
+        table = self._dynamo_table()
+        if table is not None:
+            from botocore.exceptions import ClientError
+
+            try:
+                table.put_item(
+                    Item={
+                        "owner": owner,
+                        "recordKey": record_key,
+                        "payload": json.dumps(stored, separators=(",", ":")),
+                        "updatedAt": stored["updatedAt"],
+                    },
+                    ConditionExpression="attribute_not_exists(#owner) AND attribute_not_exists(#key)",
+                    ExpressionAttributeNames={"#owner": "owner", "#key": "recordKey"},
+                )
+                return True
+            except ClientError as error:
+                if error.response.get("Error", {}).get("Code") == "ConditionalCheckFailedException":
+                    return False
+                raise
+        with self._lock:
+            key = (owner, record_key)
+            if key in self._memory:
+                return False
+            self._memory[key] = stored
+            return True
+
+    def delete(self, owner: str, record_key: str) -> None:
+        table = self._dynamo_table()
+        if table is not None:
+            table.delete_item(Key={"owner": owner, "recordKey": record_key})
+            return
+        with self._lock:
+            self._memory.pop((owner, record_key), None)
+
     def list_prefix(self, owner: str, prefix: str) -> list[dict[str, Any]]:
         table = self._dynamo_table()
         if table is not None:

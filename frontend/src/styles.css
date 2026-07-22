@@ -230,6 +230,8 @@ button, a { -webkit-tap-highlight-color: transparent; }
 .primary-nav a:hover::after, .primary-nav a.active::after { transform: scaleX(1); }
 
 .topbar-actions { display: flex; align-items: center; gap: 10px; justify-self: end; }
+.account-email { max-width: 190px; overflow: hidden; text-overflow: ellipsis; color: var(--muted); font-size: 11px; white-space: nowrap; }
+.account-logout { background: transparent; cursor: pointer; font-family: inherit; }
 .icon-button {
   width: 38px;
   height: 38px;
@@ -310,6 +312,8 @@ button, a { -webkit-tap-highlight-color: transparent; }
 }
 .mobile-nav a.active { color: var(--green); }
 .mobile-nav a:last-of-type { border-bottom: 0; }
+.mobile-sign-out { margin: 16px 12px; padding: 13px; border: 1px solid var(--line); background: var(--panel); color: var(--muted); font: 700 11px "Manrope", sans-serif; cursor: pointer; overflow-wrap: anywhere; }
+.mobile-sign-out:hover { color: var(--green); border-color: var(--green); }
 
 @keyframes fade-in { from { opacity: 0; } }
 @keyframes slide-in { from { transform: translateX(100%); } }
@@ -962,6 +966,7 @@ kbd {
 .outreach-project-picker { display: grid; gap: 7px; margin-bottom: 20px; max-width: 980px; }
 .outreach-project-picker select { width: 100%; }
 .outreach-layout { display: grid; grid-template-columns: minmax(260px, 0.7fr) minmax(0, 1.3fr); gap: 14px; align-items: start; }
+.outreach-workspace { display: grid; gap: 14px; }
 .outreach-context { position: sticky; top: 96px; padding: 25px; border: 1px solid var(--line); background: var(--panel); }
 .outreach-context h2 { margin: 8px 0 17px; font-size: 25px; line-height: 1.2; }
 .outreach-context ul { margin: 16px 0; padding-left: 19px; color: var(--ink-soft); font-size: 11px; line-height: 1.7; }
@@ -972,6 +977,15 @@ kbd {
 .draft-form textarea { width: 100%; resize: vertical; line-height: 1.55; }
 .outreach-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 9px; }
 .outreach-actions span { color: var(--muted); font-size: 11px; }
+.gmail-history-panel { display: grid; gap: 16px; padding: 25px; border: 1px solid var(--line); background: var(--panel); }
+.gmail-history-panel h2 { margin: 0; font-size: 24px; letter-spacing: -0.04em; }
+.gmail-history-panel > small { color: var(--muted); line-height: 1.5; }
+.gmail-thread { display: grid; gap: 8px; padding: 12px; border: 1px solid var(--line); background: var(--panel-sunk); }
+.gmail-thread > div { display: grid; gap: 4px; padding-bottom: 10px; border-bottom: 1px solid var(--line); }
+.gmail-thread > div:last-child { padding-bottom: 0; border-bottom: 0; }
+.gmail-thread strong { font-size: 12px; }
+.gmail-thread small { color: var(--muted); font-size: 10px; overflow-wrap: anywhere; }
+.gmail-thread p { margin: 2px 0 0; color: var(--ink-soft); font-size: 11px; line-height: 1.5; }
 .outreach-history { margin-top: 52px; }
 .history-list { display: grid; gap: 7px; }
 .history-list > a {
@@ -1069,6 +1083,15 @@ kbd {
 .integration-card > div { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; }
 .status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--amber); flex: 0 0 auto; }
 .status-dot.connected { background: var(--positive); }
+
+/* Authentication */
+.login-page { min-height: 100vh; display: grid; place-items: center; padding: 28px; background: radial-gradient(circle at 70% 20%, var(--green-wash), transparent 44%), var(--paper); }
+.login-card { width: min(100%, 520px); display: grid; justify-items: start; gap: 18px; padding: clamp(30px, 6vw, 58px); border: 1px solid var(--line); background: var(--panel); box-shadow: var(--shadow-lg); }
+.login-card h1 { margin: 0; font-size: clamp(34px, 6vw, 52px); letter-spacing: -0.06em; }
+.login-card > p:not(.eyebrow) { margin: 0; color: var(--muted); line-height: 1.65; }
+.login-card .eyebrow { margin: 6px 0 -9px; }
+.login-card small { color: var(--muted); }
+.is-disabled { pointer-events: none; opacity: 0.5; }
 .not-found { min-height: 420px; }
 .not-found code {
   padding: 2px 7px;
@@ -1138,6 +1161,7 @@ kbd {
    ========================================================================== */
 
 @media (max-width: 1180px) {
+  .account-email { display: none; }
   .hero { grid-template-columns: 1fr minmax(300px, 340px); gap: 40px; }
   .search-panel { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .search-panel .button { grid-column: 1 / -1; }

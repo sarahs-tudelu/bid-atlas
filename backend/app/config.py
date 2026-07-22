@@ -18,6 +18,15 @@ class Settings:
     workspace_table: str | None
     documents_bucket: str | None
     cors_origins: tuple[str, ...]
+    public_url: str
+    google_redirect_uri: str
+    google_scopes: tuple[str, ...]
+    google_client_id: str | None
+    google_client_secret: str | None
+    session_secret: str | None
+    google_client_id_parameter: str | None
+    google_client_secret_parameter: str | None
+    session_secret_parameter: str | None
 
 
 def load_settings() -> Settings:
@@ -46,6 +55,25 @@ def load_settings() -> Settings:
         workspace_table=os.getenv("BIDATLAS_WORKSPACE_TABLE") or None,
         documents_bucket=os.getenv("BIDATLAS_DOCUMENTS_BUCKET") or None,
         cors_origins=cors_origins,
+        public_url=os.getenv("BIDATLAS_PUBLIC_URL", "http://localhost:5173").rstrip("/"),
+        google_redirect_uri=os.getenv(
+            "BIDATLAS_GOOGLE_REDIRECT_URI",
+            "http://localhost:8000/api/auth/google/callback",
+        ),
+        google_scopes=tuple(
+            scope.strip()
+            for scope in os.getenv(
+                "BIDATLAS_GOOGLE_SCOPES",
+                "openid email profile https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/gmail.readonly",
+            ).split()
+            if scope.strip()
+        ),
+        google_client_id=os.getenv("BIDATLAS_GOOGLE_CLIENT_ID") or None,
+        google_client_secret=os.getenv("BIDATLAS_GOOGLE_CLIENT_SECRET") or None,
+        session_secret=os.getenv("BIDATLAS_SESSION_SECRET") or None,
+        google_client_id_parameter=os.getenv("BIDATLAS_GOOGLE_CLIENT_ID_PARAMETER") or None,
+        google_client_secret_parameter=os.getenv("BIDATLAS_GOOGLE_CLIENT_SECRET_PARAMETER") or None,
+        session_secret_parameter=os.getenv("BIDATLAS_SESSION_SECRET_PARAMETER") or None,
     )
 
 

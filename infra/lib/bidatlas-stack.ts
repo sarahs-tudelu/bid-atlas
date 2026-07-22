@@ -21,6 +21,11 @@ export class BidAtlasStack extends cdk.Stack {
     cdk.Tags.of(this).add("Project", "BidAtlas");
     const repositoryRoot = path.resolve(__dirname, "..", "..");
     const samApiKeyParameterName = this.node.tryGetContext("samApiKeyParameterName") as string | undefined;
+    const googleClientIdParameterName = this.node.tryGetContext("googleClientIdParameterName") as string | undefined;
+    const googleClientSecretParameterName = this.node.tryGetContext("googleClientSecretParameterName") as string | undefined;
+    const sessionSecretParameterName = this.node.tryGetContext("sessionSecretParameterName") as string | undefined;
+    const publicUrl = (this.node.tryGetContext("publicUrl") as string | undefined)?.replace(/\/$/, "")
+      ?? "http://localhost:5173";
 
     const workspaceTable = new dynamodb.Table(this, "WorkspaceTable", {
       partitionKey: { name: "owner", type: dynamodb.AttributeType.STRING },
@@ -108,12 +113,41 @@ export class BidAtlasStack extends cdk.Stack {
         BIDATLAS_CATALOG_REFRESH_SECONDS: "300",
         BIDATLAS_WORKSPACE_TABLE: workspaceTable.tableName,
         BIDATLAS_DOCUMENTS_BUCKET: documentsBucket.bucketName,
+        BIDATLAS_PUBLIC_URL: publicUrl,
+        BIDATLAS_GOOGLE_REDIRECT_URI: `${publicUrl}/api/auth/google/callback`,
+        BIDATLAS_CORS_ORIGINS: publicUrl,
+        BIDATLAS_SAM_ENABLED: samApiKeyParameterName ? "true" : "false",
+        ...(googleClientIdParameterName
+          ? { BIDATLAS_GOOGLE_CLIENT_ID_PARAMETER: googleClientIdParameterName }
+          : {}),
+        ...(googleClientSecretParameterName
+          ? { BIDATLAS_GOOGLE_CLIENT_SECRET_PARAMETER: googleClientSecretParameterName }
+          : {}),
+        ...(sessionSecretParameterName
+          ? { BIDATLAS_SESSION_SECRET_PARAMETER: sessionSecretParameterName }
+          : {}),
       },
     });
     workspaceTable.grantReadWriteData(apiFunction);
     documentsBucket.grantReadWrite(apiFunction);
     catalogBucket.grantRead(apiFunction);
     apiFunction.node.addDependency(catalogDeployment);
+
+    const apiSecretParameters = [
+      googleClientIdParameterName,
+      googleClientSecretParameterName,
+      sessionSecretParameterName,
+    ].filter((name): name is string => Boolean(name));
+    if (apiSecretParameters.length) {
+      apiFunction.addToRolePolicy(new iam.PolicyStatement({
+        actions: ["ssm:GetParameter"],
+        resources: apiSecretParameters.map((name) => cdk.Stack.of(this).formatArn({
+          service: "ssm",
+          resource: "parameter",
+          resourceName: name.replace(/^\/+/, ""),
+        })),
+      }));
+    }
 
     const northeastRefreshFunction = new lambda.Function(this, "NortheastRefreshFunction", {
       runtime: lambda.Runtime.PYTHON_3_12,

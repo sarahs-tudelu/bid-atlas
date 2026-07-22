@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from .canopy import SEARCH_PROFILES, profile_matches, score_project
+from .qualification import is_contactable_canopy_project
 
 
 ARCHIVED_STAGES = {"completed", "cancelled"}
@@ -125,7 +126,13 @@ class ProjectCatalog:
 
     def _initialize(self, snapshot: dict[str, Any], registry: dict[str, Any]) -> None:
         self.generated_at: str = snapshot["generatedAt"]
-        self.projects: list[dict[str, Any]] = snapshot.get("projects", [])
+        source_projects: list[dict[str, Any]] = snapshot.get("projects", [])
+        self.source_project_count = len(source_projects)
+        self.projects = [
+            project
+            for project in source_projects
+            if is_contactable_canopy_project(project)
+        ]
         self.sources: list[dict[str, Any]] = snapshot.get("sources", [])
         self.coverage: dict[str, Any] = snapshot.get("coverage", {})
         self.inventory: dict[str, Any] = snapshot.get("inventory", {})
@@ -144,8 +151,26 @@ class ProjectCatalog:
             "projects": [self._project_response(project) for project in self.projects[:10]],
             "sources": self.sources,
             "coverage": self.coverage,
-            "inventory": self.inventory,
+            "inventory": self._qualified_inventory(),
             "warnings": self.warnings,
+        }
+
+    def _qualified_inventory(self) -> dict[str, Any]:
+        stage_counts: dict[str, int] = {}
+        organizations: set[str] = set()
+        for project in self.projects:
+            stage = str(project.get("stage") or "unclassified")
+            stage_counts[stage] = stage_counts.get(stage, 0) + 1
+            for participant in project.get("participants", []):
+                organization = str(participant.get("organization") or "").strip()
+                if organization:
+                    organizations.add(organization.casefold())
+        return {
+            **self.inventory,
+            "totalProjects": len(self.projects),
+            "stageCounts": stage_counts,
+            "contractorOrganizations": len(organizations),
+            "sourceProjectCount": self.source_project_count,
         }
 
     def project(self, project_id: str) -> dict[str, Any] | None:
@@ -205,6 +230,8 @@ class ProjectCatalog:
                 "totalPages": total_pages,
                 "snapshotGeneratedAt": self.generated_at,
                 "sourceMode": "aws-snapshot",
+                "sourceProjectCount": self.source_project_count,
+                "qualifiedProjectCount": len(self.projects),
                 "nationallyComplete": bool(self.coverage.get("nationallyComplete", False)),
                 "warnings": self.warnings,
                 "profile": profile.id if profile is not None else None,

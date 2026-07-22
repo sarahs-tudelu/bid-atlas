@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { NavLink, Outlet } from "react-router-dom";
 
 import { useTheme } from "../hooks/useTheme";
+import { useAuth } from "../hooks/useAuth";
 
 const primaryLinks = [
   ["/projects", "Open bids"],
@@ -47,6 +48,7 @@ function MenuIcon({ open }: { open: boolean }) {
 
 export function AppShell() {
   const { theme, toggleTheme } = useTheme();
+  const { user, logout } = useAuth();
   const [menuOpen, setMenuOpen] = useState(false);
   const closeMenu = () => setMenuOpen(false);
 
@@ -86,6 +88,10 @@ export function AppShell() {
         </nav>
 
         <div className="topbar-actions">
+          <span className="account-email" title={user?.email}>{user?.email}</span>
+          <button className="workspace-link account-logout" type="button" onClick={() => void logout()}>
+            Sign out
+          </button>
           <NavLink className="workspace-link" to="/bid-desk">
             Bid desk
           </NavLink>
@@ -125,6 +131,9 @@ export function AppShell() {
                 {label}
               </NavLink>
             ))}
+            <button className="mobile-sign-out" type="button" onClick={() => void logout()}>
+              Sign out {user?.email}
+            </button>
           </nav>
         </>
       )}

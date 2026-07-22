@@ -4,6 +4,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import { apiRequest, queryString } from "../api/client";
 import { AsyncState } from "../components/AsyncState";
 import { useApi } from "../hooks/useApi";
+import { useAuth } from "../hooks/useAuth";
 import type { OutreachDraft, Project, SearchResponse } from "../types";
 
 interface DraftResponse {
@@ -15,28 +16,21 @@ interface HistoryResponse {
   history: OutreachDraft[];
 }
 
-function mailtoUrl(draft: OutreachDraft): string {
-  return `mailto:${encodeURIComponent(draft.to)}?subject=${encodeURIComponent(draft.subject)}&body=${encodeURIComponent(draft.body)}`;
-}
-
 export function OutreachPage() {
+  const { user } = useAuth();
   const [params, setParams] = useSearchParams();
   const projectId = params.get("project") ?? "";
-  const candidatesPath = `/api/search${queryString({
+  const candidates = useApi<SearchResponse>(`/api/search${queryString({
     profile: "direct_northeast",
     readiness: "all",
     includeArchived: false,
     limit: 100,
-  })}`;
-  const candidates = useApi<SearchResponse>(candidatesPath);
+  })}`);
   const history = useApi<HistoryResponse>("/api/outreach/history");
   const [draftState, setDraft] = useState<OutreachDraft | null>(null);
   const [failure, setFailure] = useState<{ projectId: string; message: string } | null>(null);
   const [saveStatus, setSaveStatus] = useState("");
 
-  // Both the draft and its failure are tagged with the project they belong to, so
-  // switching projects can never show the previous one's draft or error, and
-  // progress is derived rather than assigned synchronously inside the effect.
   const draft = draftState?.projectId === projectId ? draftState : null;
   const draftError = failure?.projectId === projectId ? failure.message : "";
   const draftLoading = Boolean(projectId) && !draft && !draftError;
@@ -70,8 +64,8 @@ export function OutreachPage() {
     [candidates.data, projectId],
   );
 
-  const save = async (statusMessage = "Draft saved."): Promise<OutreachDraft | null> => {
-    if (!draft) return null;
+  const save = async (): Promise<void> => {
+    if (!draft || draft.status === "sent") return;
     setSaveStatus("Saving…");
     try {
       const response = await apiRequest<DraftResponse>("/api/outreach/draft", {
@@ -79,38 +73,47 @@ export function OutreachPage() {
         body: JSON.stringify(draft),
       });
       setDraft(response.draft);
-      setSaveStatus(statusMessage);
+      setSaveStatus("Draft saved to your Tudelu workspace.");
       history.refetch();
-      return response.draft;
     } catch (cause) {
       setSaveStatus(cause instanceof Error ? cause.message : "Draft could not be saved.");
-      return null;
     }
   };
 
-  const openEmailClient = async () => {
-    const saved = await save("Draft saved. Your email client is opening for final review.");
-    if (saved) window.location.assign(mailtoUrl(saved));
-  };
-
-  const markSent = async () => {
-    if (!draft) return;
-    setSaveStatus("Updating history…");
+  const send = async (): Promise<void> => {
+    if (!draft || draft.status === "sent") return;
+    if (!window.confirm(`Send this message from ${user?.email} to ${draft.to}?`)) return;
+    setSaveStatus("Sending through Gmail…");
     try {
-      const response = await apiRequest<DraftResponse>("/api/outreach/mark-sent", {
+      const response = await apiRequest<DraftResponse>("/api/outreach/send", {
         method: "POST",
         body: JSON.stringify(draft),
       });
       setDraft(response.draft);
-      setSaveStatus("Marked sent in this workspace.");
+      setSaveStatus("Sent from your Tudelu Gmail account and logged in outreach history.");
       history.refetch();
     } catch (cause) {
-      setSaveStatus(cause instanceof Error ? cause.message : "Outreach history could not be updated.");
+      setSaveStatus(cause instanceof Error ? cause.message : "Gmail could not send this message.");
     }
   };
 
-  const regenerate = async () => {
+  const refreshGmailHistory = async (): Promise<void> => {
     if (!projectId) return;
+    setSaveStatus("Refreshing Gmail history…");
+    try {
+      const response = await apiRequest<DraftResponse>("/api/outreach/gmail-history", {
+        method: "POST",
+        body: JSON.stringify({ projectId }),
+      });
+      setDraft(response.draft);
+      setSaveStatus("Gmail history refreshed.");
+    } catch (cause) {
+      setSaveStatus(cause instanceof Error ? cause.message : "Gmail history could not be refreshed.");
+    }
+  };
+
+  const regenerate = async (): Promise<void> => {
+    if (!projectId || draft?.status === "sent") return;
     setSaveStatus("Regenerating…");
     try {
       const response = await apiRequest<DraftResponse>("/api/outreach/generate", {
@@ -119,7 +122,7 @@ export function OutreachPage() {
       });
       setDraft(response.draft);
       setFailure(null);
-      setSaveStatus("Draft regenerated from the published project evidence.");
+      setSaveStatus("Draft and Gmail contact history refreshed from source evidence.");
       history.refetch();
     } catch (cause) {
       setFailure({
@@ -132,16 +135,15 @@ export function OutreachPage() {
   return (
     <main className="route-page page-width">
       <header className="route-heading outreach-heading">
-        <p className="eyebrow">REVIEW-FIRST OUTREACH</p>
-        <h1>Turn a qualified project into a careful introduction.</h1>
+        <p className="eyebrow">GMAIL-CONNECTED OUTREACH</p>
+        <h1>Review contact history, then send from your Tudelu mailbox.</h1>
         <p>
-          BidAtlas uses only contacts published with the source record. Edit every draft, open it in your own email client,
-          and mark it sent only after you send it.
+          BidAtlas uses only contacts published with a qualified project. Every message requires your explicit review and confirmation.
         </p>
       </header>
 
       <label className="outreach-project-picker">
-        <span>Canopy opportunity</span>
+        <span>Contactable canopy opportunity</span>
         <select
           value={projectId}
           onChange={(event) => {
@@ -151,7 +153,7 @@ export function OutreachPage() {
           }}
           disabled={candidates.loading}
         >
-          <option value="">Choose a high-fit project</option>
+          <option value="">Choose a qualified project</option>
           {candidates.data?.projects.map((project: Project) => (
             <option key={project.id} value={project.id}>
               {project.state ?? "US"} · Fit {project.canopyFit?.score ?? 0} · {project.title}
@@ -171,86 +173,77 @@ export function OutreachPage() {
             <p className={`fit-callout fit-${draft.canopyFit.band}`}>
               Canopy fit <strong>{draft.canopyFit.score}</strong>
             </p>
-            <ul>
-              {draft.canopyFit.reasons.map((reason) => <li key={reason}>{reason}</li>)}
-            </ul>
-            {selectedProject ? (
-              <a href={selectedProject.sourceUrl} target="_blank" rel="noreferrer">Verify official source ↗</a>
-            ) : null}
-            <p className="field-hint">
-              No message is sent by BidAtlas. Your email application remains the final review and delivery boundary.
-            </p>
+            <ul>{draft.canopyFit.reasons.map((reason) => <li key={reason}>{reason}</li>)}</ul>
+            {selectedProject ? <a href={selectedProject.sourceUrl} target="_blank" rel="noreferrer">Verify official source ↗</a> : null}
+            <p className="field-hint">Sender: <strong>{user?.email}</strong></p>
           </aside>
 
-          <form className="draft-form" onSubmit={(event) => { event.preventDefault(); void save(); }}>
-            <div className="draft-form-heading">
-              <div>
-                <p className="eyebrow">EDITABLE DRAFT</p>
-                <h2>{draft.status === "sent" ? "Sent outreach" : "Outreach draft"}</h2>
+          <div className="outreach-workspace">
+            <form className="draft-form" onSubmit={(event) => { event.preventDefault(); void save(); }}>
+              <div className="draft-form-heading">
+                <div><p className="eyebrow">REVIEWED DRAFT</p><h2>{draft.status === "sent" ? "Sent outreach" : "Outreach draft"}</h2></div>
+                <button className="link-button" type="button" disabled={draft.status === "sent"} onClick={() => void regenerate()}>Regenerate</button>
               </div>
-              <button className="link-button" type="button" onClick={() => void regenerate()}>Regenerate</button>
-            </div>
 
-            {draft.contacts.length ? (
               <label>
                 <span>Published contact</span>
                 <select
                   value={draft.to}
+                  disabled={draft.status === "sent"}
                   onChange={(event) => {
                     const contact = draft.contacts.find((item) => item.email === event.target.value);
                     setDraft({ ...draft, to: event.target.value, contactName: contact?.name ?? "" });
                   }}
                 >
                   {draft.contacts.map((contact) => (
-                    <option key={contact.email} value={contact.email}>
-                      {contact.name || contact.role} · {contact.email}
-                    </option>
+                    <option key={contact.email} value={contact.email}>{contact.name || contact.role} · {contact.email}</option>
                   ))}
                 </select>
               </label>
-            ) : (
-              <p className="notice-panel">No email address was published with this record. Verify the official source before adding one.</p>
-            )}
+              <label><span>Subject</span><input value={draft.subject} disabled={draft.status === "sent"} onChange={(event) => setDraft({ ...draft, subject: event.target.value })} required maxLength={300} /></label>
+              <label><span>Message</span><textarea value={draft.body} disabled={draft.status === "sent"} onChange={(event) => setDraft({ ...draft, body: event.target.value })} required rows={11} maxLength={10000} /></label>
 
-            <label>
-              <span>To</span>
-              <input type="email" value={draft.to} onChange={(event) => setDraft({ ...draft, to: event.target.value })} placeholder="Published project contact" />
-            </label>
-            <label>
-              <span>Subject</span>
-              <input value={draft.subject} onChange={(event) => setDraft({ ...draft, subject: event.target.value })} required maxLength={300} />
-            </label>
-            <label>
-              <span>Message</span>
-              <textarea value={draft.body} onChange={(event) => setDraft({ ...draft, body: event.target.value })} required rows={11} maxLength={10000} />
-            </label>
+              <div className="outreach-actions">
+                <button className="button button-quiet" type="submit" disabled={draft.status === "sent"}>Save draft</button>
+                <button className="button button-primary" type="button" disabled={!draft.to || draft.status === "sent"} onClick={() => void send()}>
+                  Send with Gmail
+                </button>
+                <span aria-live="polite">{saveStatus}</span>
+              </div>
+            </form>
 
-            <div className="outreach-actions">
-              <button className="button button-quiet" type="submit">Save draft</button>
-              <button className="button button-primary" type="button" disabled={!draft.to} onClick={() => void openEmailClient()}>
-                Open in email client
-              </button>
-              <button className="button button-quiet" type="button" disabled={!draft.to} onClick={() => void markSent()}>
-                Mark sent
-              </button>
-              <span aria-live="polite">{saveStatus}</span>
-            </div>
-          </form>
+            <section className="gmail-history-panel">
+              <div className="draft-form-heading">
+                <div><p className="eyebrow">GMAIL CONTEXT</p><h2>Prior contact</h2></div>
+                <button className="link-button" type="button" onClick={() => void refreshGmailHistory()}>Refresh</button>
+              </div>
+              {draft.emailHistory?.length ? draft.emailHistory.map((thread) => (
+                <article className="gmail-thread" key={thread.threadId}>
+                  {thread.messages.map((message) => (
+                    <div key={message.id}>
+                      <strong>{message.subject || "(No subject)"}</strong>
+                      <small>{message.from} → {message.to} · {message.date}</small>
+                      <p>{message.snippet}</p>
+                    </div>
+                  ))}
+                </article>
+              )) : <p className="evidence-empty">No prior messages with the published project contacts were found.</p>}
+              <small>Only headers and short Gmail snippets are retained with the draft; full inbox bodies are not stored.</small>
+            </section>
+          </div>
         </section>
       ) : null}
 
       {!projectId && !draftLoading ? (
         <div className="empty-panel">
-          <h2>Choose a qualified opportunity</h2>
-          <p>Start here or use “Email outreach” on any project card.</p>
+          <h2>Choose a contactable canopy opportunity</h2>
+          <p>Every visible project has a published contact and meets the Canopy fit threshold.</p>
           <Link className="button button-primary" to="/projects?profile=direct_northeast">Find Northeast canopy work</Link>
         </div>
       ) : null}
 
       <section className="outreach-history">
-        <div className="section-heading">
-          <div><p className="eyebrow">DEVICE WORKSPACE</p><h2>Draft and sent history</h2></div>
-        </div>
+        <div className="section-heading"><div><p className="eyebrow">TUDELU WORKSPACE</p><h2>Draft and sent history</h2></div></div>
         <AsyncState loading={history.loading} error={history.error} onRetry={history.refetch}>
           {history.data?.history.length ? (
             <div className="history-list">
@@ -258,11 +251,11 @@ export function OutreachPage() {
                 <Link key={item.projectId} to={`/outreach?project=${encodeURIComponent(item.projectId)}`}>
                   <span className={`stage-badge ${item.status === "sent" ? "stage-bidding" : ""}`}>{item.status}</span>
                   <strong>{item.projectTitle}</strong>
-                  <small>{item.to || "Recipient not selected"}</small>
+                  <small>{item.to} {item.sentBy ? `· ${item.sentBy}` : ""}</small>
                 </Link>
               ))}
             </div>
-          ) : <p className="evidence-empty">No outreach drafts have been saved on this device.</p>}
+          ) : <p className="evidence-empty">No outreach drafts have been saved for this Tudelu account.</p>}
         </AsyncState>
       </section>
     </main>

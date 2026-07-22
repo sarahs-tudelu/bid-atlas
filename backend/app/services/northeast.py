@@ -51,6 +51,8 @@ SAM_QUERIES = (
 )
 MAX_SOURCE_BYTES = 5_000_000
 MAX_SAM_BYTES = 10_000_000
+SAM_PAGE_LIMIT = 1000
+SAM_MAX_PAGES_PER_QUERY = 5
 
 
 def sam_source_id(state: str) -> str:
@@ -478,29 +480,36 @@ def fetch_sam_state(
     complete = True
 
     for query in SAM_QUERIES:
-        params: list[tuple[str, str]] = [
-            ("api_key", api_key),
-            ("postedFrom", (current_date - timedelta(days=364)).strftime("%m/%d/%Y")),
-            ("postedTo", current_date.strftime("%m/%d/%Y")),
-            ("limit", "100"),
-            ("offset", "0"),
-            ("status", "active"),
-            ("state", state),
-            ("title", query),
-        ]
-        params.extend(("ptype", item) for item in ("p", "o", "k", "r"))
         try:
-            payload = fetch_json(f"{SAM_API_URL}?{urlencode(params)}")
-            page_records = payload.get("opportunitiesData")
-            if not isinstance(page_records, list):
-                raise ValueError("response did not contain an opportunitiesData list")
-            successful_queries += 1
-            if int(payload.get("totalRecords") or 0) > len(page_records):
+            for page_index in range(SAM_MAX_PAGES_PER_QUERY):
+                params: list[tuple[str, str]] = [
+                    ("api_key", api_key),
+                    ("postedFrom", (current_date - timedelta(days=364)).strftime("%m/%d/%Y")),
+                    ("postedTo", current_date.strftime("%m/%d/%Y")),
+                    ("limit", str(SAM_PAGE_LIMIT)),
+                    ("offset", str(page_index * SAM_PAGE_LIMIT)),
+                    ("status", "active"),
+                    ("state", state),
+                    ("title", query),
+                ]
+                params.extend(("ptype", item) for item in ("p", "o", "k", "r"))
+                payload = fetch_json(f"{SAM_API_URL}?{urlencode(params)}")
+                page_records = payload.get("opportunitiesData")
+                if not isinstance(page_records, list):
+                    raise ValueError("response did not contain an opportunitiesData list")
+                if page_index == 0:
+                    successful_queries += 1
+                for record in page_records:
+                    if isinstance(record, dict) and record.get("noticeId"):
+                        records.setdefault(str(record["noticeId"]), record)
+                total_records = int(payload.get("totalRecords") or 0)
+                if (page_index + 1) * SAM_PAGE_LIMIT >= total_records:
+                    break
+            else:
                 complete = False
-                warnings.append(f"SAM.gov {state}: {query!r} results exceeded the guarded page limit")
-            for record in page_records:
-                if isinstance(record, dict) and record.get("noticeId"):
-                    records.setdefault(str(record["noticeId"]), record)
+                warnings.append(
+                    f"SAM.gov {state}: {query!r} exceeded the guarded {SAM_MAX_PAGES_PER_QUERY}-page limit"
+                )
         except Exception as error:
             complete = False
             warnings.append(f"SAM.gov {state}: {query!r} query failed: {error}")

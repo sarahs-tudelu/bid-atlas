@@ -164,8 +164,8 @@ def test_snapshot_merge_replaces_only_successful_nj_sources_and_updates_coverage
 
     catalog = ProjectCatalog.from_snapshot(refreshed, {"sources": []})
     search = catalog.search(SearchFilters(state="NJ", readiness="bid-ready", limit=10))
-    assert search["meta"]["matchedProjects"] == 1
-    assert search["projects"][0]["sourceRecordId"] == "M1642-00"
+    assert search["meta"]["matchedProjects"] == 0
+    assert search["meta"]["sourceProjectCount"] == len(refreshed["projects"])
 
 
 class _Body:

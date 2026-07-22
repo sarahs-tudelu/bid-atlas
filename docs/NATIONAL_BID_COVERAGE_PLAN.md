@@ -134,7 +134,7 @@ Show published procurement contact, owner/agency, architect/engineer, constructi
 
 Before opening, display only confirmed public plan holders or bidders when the issuer legally publishes them. After opening, ingest bid tabs and award notices and clearly label their effective date.
 
-The active outreach workflow may prefill only email addresses carried by the source record. Users must review the message in BidAtlas and deliver it through their own email client. A browser-generated workspace ID is not sufficient authorization for a backend mail sender.
+The active catalog admits a project only when it has at least one email address carried by the source record and a Canopy score of at least 8. Outreach recipients remain restricted to those source-published addresses. A verified `@tudelu.com` Google login owns the workspace, reads privacy-minimized Gmail history for the published contacts, and sends a user-reviewed message through that user’s Gmail account. Full inbox bodies are not retained, and a successful Gmail API response is required before sent status is recorded.
 
 ## Coverage dashboard that tells the truth
 
@@ -178,6 +178,8 @@ The active AWS application now runs a daily Northeast regional refresh:
 - Massachusetts and Pennsylvania: DCR and DGS current construction listings.
 - New Hampshire and Vermont: official DOT/VTrans ArcGIS project services, narrowed to relevant lifecycle records; Vermont factsheets add published project contacts when available.
 - Optional federal layer: active SAM.gov opportunities fanned out by each Northeast state and canopy/proxy query when an SSM-backed API key is configured.
+
+The SAM key activates the official Opportunities API and expands the bounded federal query fan-out; it does not authorize browser scraping. Results still pass contact extraction and the global Canopy/contact visibility gate before appearing to users.
 
 The CT/RI WebProcure adapter completes the publisher's currently incomplete server chain with DigiCert's official, checksum-pinned `Thawte TLS RSA CA G1` intermediate while retaining full TLS and hostname verification. Review or remove that narrowly scoped workaround before the intermediate expires on November 2, 2027.
 

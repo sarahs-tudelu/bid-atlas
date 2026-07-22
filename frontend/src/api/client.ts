@@ -1,13 +1,4 @@
 const API_BASE = (import.meta.env.VITE_API_BASE_URL ?? "").replace(/\/$/, "");
-const WORKSPACE_KEY = "bidatlas.workspace-id";
-
-function workspaceId(): string {
-  const existing = window.localStorage.getItem(WORKSPACE_KEY);
-  if (existing) return existing;
-  const identifier = `${crypto.randomUUID()}@device.bidatlas`;
-  window.localStorage.setItem(WORKSPACE_KEY, identifier);
-  return identifier;
-}
 
 export class ApiError extends Error {
   constructor(
@@ -24,9 +15,9 @@ export async function apiRequest<T>(
 ): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`, {
     ...init,
+    credentials: "include",
     headers: {
       accept: "application/json",
-      "x-bidatlas-user": workspaceId(),
       ...(init.body ? { "content-type": "application/json" } : {}),
       ...init.headers,
     },
@@ -42,6 +33,7 @@ export async function apiRequest<T>(
     }
     throw new ApiError(message, response.status);
   }
+  if (response.status === 204) return undefined as T;
   return response.json() as Promise<T>;
 }
 

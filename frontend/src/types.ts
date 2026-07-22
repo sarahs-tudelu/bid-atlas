@@ -49,6 +49,27 @@ export interface OutreachContact {
   role: string;
 }
 
+export interface AuthUser {
+  email: string;
+  name: string;
+  picture: string;
+  gmailConnected: boolean;
+}
+
+export interface GmailMessageSummary {
+  id: string;
+  from: string;
+  to: string;
+  subject: string;
+  date: string;
+  snippet: string;
+}
+
+export interface GmailThreadSummary {
+  threadId: string;
+  messages: GmailMessageSummary[];
+}
+
 export interface OutreachDraft {
   projectId: string;
   projectTitle: string;
@@ -62,6 +83,11 @@ export interface OutreachDraft {
   canopyFit: CanopyFit;
   updatedAt?: string;
   sentAt?: string;
+  sentBy?: string;
+  gmailMessageId?: string;
+  gmailThreadId?: string;
+  emailHistory?: GmailThreadSummary[];
+  historySyncedAt?: string;
 }
 
 export interface Project {
@@ -140,6 +166,7 @@ export interface CoverageResponse {
     stateCounts: Record<string, number>;
     contractorOrganizations: number;
     refreshedAt: string;
+    sourceProjectCount?: number;
   };
   sources: Source[];
   warnings: string[];

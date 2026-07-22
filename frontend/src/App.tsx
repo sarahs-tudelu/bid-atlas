@@ -1,6 +1,7 @@
 import { Route, Routes } from "react-router-dom";
 
 import { AppShell } from "./components/AppShell";
+import { AuthProvider, useAuth } from "./hooks/useAuth";
 import { BidDeskPage } from "./pages/BidDeskPage";
 import { CompaniesPage } from "./pages/CompaniesPage";
 import { CoveragePage } from "./pages/CoveragePage";
@@ -8,12 +9,16 @@ import { DocumentsPage } from "./pages/DocumentsPage";
 import { HomePage } from "./pages/HomePage";
 import { IntegrationsPage } from "./pages/IntegrationsPage";
 import { LeadsPage } from "./pages/LeadsPage";
+import { LoginPage } from "./pages/LoginPage";
 import { NotFoundPage } from "./pages/NotFoundPage";
 import { OutreachPage } from "./pages/OutreachPage";
 import { ProjectsPage } from "./pages/ProjectsPage";
 import { SourceMonitorPage } from "./pages/SourceMonitorPage";
 
-export function App() {
+function AuthenticatedRoutes() {
+  const { user, loading, error } = useAuth();
+  if (loading) return <main className="login-page"><div className="loading-panel">Checking your Tudelu session…</div></main>;
+  if (!user) return <LoginPage error={error} />;
   return (
     <Routes>
       <Route element={<AppShell />}>
@@ -31,4 +36,8 @@ export function App() {
       </Route>
     </Routes>
   );
+}
+
+export function App() {
+  return <AuthProvider><AuthenticatedRoutes /></AuthProvider>;
 }
