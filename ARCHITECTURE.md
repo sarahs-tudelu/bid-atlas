@@ -119,11 +119,11 @@ EventBridge invokes `jobs/refresh_national.handler` daily. The orchestrator fetc
 - CT/RI WebProcure public boards;
 - Massachusetts DCR and Pennsylvania DGS;
 - New Hampshire and Vermont DOT/ArcGIS services;
-- official SAM.gov Opportunities API searches for all 50 states and D.C., with an independent state partition running each configured Canopy/proxy query.
+- official SAM.gov Opportunities API searches for all 50 states and D.C.; each configured Canopy/proxy query runs once nationwide and records are split locally into independent state partitions by published place of performance.
 
-The SAM connector paginates with the official API’s documented maximum 1,000-record page for each state/query pair, up to a guarded five-page ceiling. It deduplicates notices returned by multiple queries, normalizes place of performance and `pointOfContact`, applies relevance scoring, and retains source links. It warns if a pair exceeds the guard rather than claiming completeness. The key permits the API’s documented keyed rate/usage path; it is not used to evade site access controls.
+The SAM connector paginates with the official API’s documented maximum 1,000-record page for each nationwide keyword query, up to a guarded five-page ceiling. It paces requests, applies bounded global backoff to HTTP 429 responses, deduplicates notices returned by multiple queries, normalizes place of performance and `pointOfContact`, applies relevance scoring, and retains source links. It warns if a query exceeds the guard rather than claiming completeness. The key permits the API’s documented keyed rate/usage path; it is not used to evade site access controls.
 
-Six state workers bound the nationwide SAM fan-out. Notices returned by multiple queries are deduplicated within each state partition. The merge algorithm replaces only successful partitions. Failed partitions keep their last successful records and add warnings/degraded status. Aggregated inventory and coverage are recomputed after merge, then S3 receives a new object version. FastAPI request latency is independent of publisher availability.
+The seven-keyword batch is transactional for provider failures: if any keyword request fails, all prior state partitions are retained instead of being replaced by partial data. A complete batch is split into 51 state/D.C. results, allowing source-level health and coverage to remain independently observable. Notices returned by multiple queries are deduplicated before partitioning. Aggregated inventory and coverage are recomputed after merge, then S3 receives a new object version. FastAPI request latency is independent of publisher availability.
 
 The CT/RI connector includes a narrowly scoped, checksum-pinned Thawte intermediate certificate because the publisher currently serves an incomplete chain. Hostname and certificate validation remain enabled. Reassess before the certificate expires on 2027-11-02.
 

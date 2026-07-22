@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import json
 import ssl
 from datetime import date
+from io import BytesIO
+from urllib.error import HTTPError
 from urllib.parse import parse_qs, urlparse
 
+from backend.app.services import northeast
 from backend.app.services.northeast import (
     MAINE_DOT_SOURCE_ID,
     NEW_YORK_DOT_SOURCE_ID,
@@ -245,6 +249,51 @@ def test_sam_state_connector_deduplicates_queries_and_keeps_published_contact() 
     assert len(result.projects) == 1
     assert result.projects[0]["participants"][0]["email"] == "pat@example.gov"
     assert result.projects[0]["sourceUrl"].startswith("https://sam.gov/")
+
+
+def test_sam_http_client_retries_429_after_global_backoff(monkeypatch) -> None:
+    calls = 0
+    deferred: list[float] = []
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def geturl(self) -> str:
+            return "https://api.sam.gov/opportunities/v2/search"
+
+        def read(self, limit: int) -> bytes:
+            del limit
+            return json.dumps({"totalRecords": 0, "opportunitiesData": []}).encode()
+
+    def urlopen(request, *, timeout):
+        nonlocal calls
+        del timeout
+        calls += 1
+        if calls == 1:
+            raise HTTPError(
+                request.full_url,
+                429,
+                "Too Many Requests",
+                {"Retry-After": "0"},
+                BytesIO(),
+            )
+        return Response()
+
+    monkeypatch.setattr(northeast, "urlopen", urlopen)
+    monkeypatch.setattr(northeast, "_wait_for_sam_request_slot", lambda: None)
+    monkeypatch.setattr(northeast, "_defer_sam_requests", deferred.append)
+
+    result = northeast.fetch_sam_json(
+        "https://api.sam.gov/opportunities/v2/search?api_key=not-real"
+    )
+
+    assert result["opportunitiesData"] == []
+    assert calls == 2
+    assert deferred == [2.0]
 
 
 def test_sam_state_connector_follows_documented_pagination() -> None:

@@ -20,7 +20,8 @@ Reviewers should reject a code change when the documented workflow no longer mat
 Official state pages / public bid boards / ArcGIS / SAM.gov Opportunities API
   -> Daily EventBridge invocation
   -> National refresh Lambda fetches bounded, allowlisted sources
-  -> Regional board adapters run alongside 51 independent SAM.gov state/D.C. partitions
+  -> Regional board adapters run alongside a rate-efficient nationwide SAM query batch
+  -> SAM results are partitioned locally into 51 independent state/D.C. source results
   -> Each successful source partition is normalized and replaced
   -> Failed partitions retain their prior records and are marked degraded
   -> Versioned, encrypted private S3 catalog
@@ -45,7 +46,7 @@ Official state pages / public bid boards / ArcGIS / SAM.gov Opportunities API
 ```
 
 The application uses the official SAM.gov Opportunities API when its API key is configured. It does not browser-scrape SAM.gov.
-The connector paginates with the API’s documented maximum of 1,000 records per state/query page, deduplicates overlapping query results, and warns instead of silently claiming completeness if a query exceeds the guarded five-page ceiling. See the [official GSA API contract](https://open.gsa.gov/api/get-opportunities-public-api/).
+The connector runs each canopy/proxy keyword once nationwide, paginates with the API’s documented maximum of 1,000 records per query page, deduplicates overlapping results, and partitions records locally by place of performance. Requests are paced, HTTP 429 responses honor bounded backoff, and a failed keyword batch retains every prior state partition. The connector warns instead of silently claiming completeness if a query exceeds the guarded five-page ceiling. See the [official GSA API contract](https://open.gsa.gov/api/get-opportunities-public-api/).
 
 ## Technology stack
 
@@ -162,7 +163,7 @@ Coverage separates raw connected-source inventory from the admitted Canopy queue
 - Connecticut and Rhode Island WebProcure boards;
 - Massachusetts DCR and Pennsylvania DGS;
 - New Hampshire DOT and Vermont VTrans/ArcGIS;
-- SAM.gov federal opportunities, fanned out into independent partitions for all 50 states and D.C.; each partition runs every configured canopy/proxy query.
+- SAM.gov federal opportunities for all 50 states and D.C.; each configured canopy/proxy query runs once nationwide and the results are split into independent state partitions by published place of performance.
 
 The SAM.gov overlay provides a nationwide federal connection, not complete state or local coverage. State coverage remains `partial` where a named regional agency/board is connected and `identified` or `not-connected` elsewhere. These connections do not cover every municipality, school, authority, permit office, platform, or private project. See [`docs/NATIONAL_BID_COVERAGE_PLAN.md`](docs/NATIONAL_BID_COVERAGE_PLAN.md).
 

@@ -5,6 +5,8 @@ import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, datetime, timedelta, timezone
 from html import unescape
+from threading import Lock
+from time import monotonic, sleep
 from typing import Any, Callable
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urljoin, urlparse
@@ -54,6 +56,11 @@ MAX_SOURCE_BYTES = 5_000_000
 MAX_SAM_BYTES = 10_000_000
 SAM_PAGE_LIMIT = 1000
 SAM_MAX_PAGES_PER_QUERY = 5
+SAM_MIN_REQUEST_INTERVAL_SECONDS = 0.5
+SAM_429_BACKOFF_SECONDS = (2.0, 5.0, 10.0)
+
+_sam_rate_lock = Lock()
+_sam_next_request_at = 0.0
 
 
 def sam_source_id(state: str) -> str:
@@ -358,6 +365,36 @@ def parse_new_york_dot_projects(
     return SourceRefreshResult(NEW_YORK_DOT_SOURCE_ID, projects, source)
 
 
+def _wait_for_sam_request_slot() -> None:
+    global _sam_next_request_at
+    while True:
+        with _sam_rate_lock:
+            now = monotonic()
+            delay = _sam_next_request_at - now
+            if delay <= 0:
+                _sam_next_request_at = now + SAM_MIN_REQUEST_INTERVAL_SECONDS
+                return
+        sleep(delay)
+
+
+def _defer_sam_requests(delay_seconds: float) -> None:
+    global _sam_next_request_at
+    with _sam_rate_lock:
+        _sam_next_request_at = max(
+            _sam_next_request_at,
+            monotonic() + max(0.0, min(delay_seconds, 60.0)),
+        )
+
+
+def _sam_retry_delay(error: HTTPError, attempt: int) -> float:
+    default = SAM_429_BACKOFF_SECONDS[attempt]
+    try:
+        value = float(error.headers.get("Retry-After", ""))
+    except (AttributeError, TypeError, ValueError):
+        return default
+    return max(default, min(value, 60.0))
+
+
 def fetch_sam_json(url: str, timeout_seconds: int = 45) -> dict[str, Any]:
     request = Request(
         url,
@@ -366,17 +403,23 @@ def fetch_sam_json(url: str, timeout_seconds: int = 45) -> dict[str, Any]:
             "User-Agent": "BidAtlas/1.0 public-construction-index",
         },
     )
-    try:
-        with urlopen(request, timeout=timeout_seconds) as response:
-            if urlparse(response.geturl()).hostname != "api.sam.gov":
-                raise ValueError("SAM.gov redirected to an unexpected host")
-            payload = response.read(MAX_SAM_BYTES + 1)
-            if len(payload) > MAX_SAM_BYTES:
-                raise ValueError("SAM.gov response exceeded the response-size limit")
-    except HTTPError as error:
-        raise RuntimeError(f"SAM.gov request returned HTTP {error.code}") from error
-    except URLError as error:
-        raise RuntimeError("SAM.gov request could not be reached") from error
+    for attempt in range(len(SAM_429_BACKOFF_SECONDS) + 1):
+        _wait_for_sam_request_slot()
+        try:
+            with urlopen(request, timeout=timeout_seconds) as response:
+                if urlparse(response.geturl()).hostname != "api.sam.gov":
+                    raise ValueError("SAM.gov redirected to an unexpected host")
+                payload = response.read(MAX_SAM_BYTES + 1)
+                if len(payload) > MAX_SAM_BYTES:
+                    raise ValueError("SAM.gov response exceeded the response-size limit")
+            break
+        except HTTPError as error:
+            if error.code == 429 and attempt < len(SAM_429_BACKOFF_SECONDS):
+                _defer_sam_requests(_sam_retry_delay(error, attempt))
+                continue
+            raise RuntimeError(f"SAM.gov request returned HTTP {error.code}") from error
+        except URLError as error:
+            raise RuntimeError("SAM.gov request could not be reached") from error
     value = json.loads(payload.decode("utf-8", errors="replace"))
     if not isinstance(value, dict):
         raise ValueError("SAM.gov returned an unexpected response")
