@@ -165,3 +165,13 @@ Expand through the long-tail government registry by organization type and volume
 ### Ongoing
 
 Run daily source discovery, failure repair, sample verification, legal/access review, and coverage reconciliation. Expand internationally only by adding country-specific legal, procurement, language, and connector modules; do not relabel U.S. coverage as worldwide coverage.
+
+## Implemented AWS connector slice
+
+New Jersey is the first state source group migrated from the archived connector runtime into the active AWS application:
+
+- NJ Division of Property Management and Construction contractor project advertisements are refreshed daily as the initial State construction-procurement source.
+- NJDOT current advertised construction projects are refreshed daily from the official Notice to Contractors page.
+- The parser retains published project numbers, scopes, counties, estimated values, deadline revisions, lifecycle evidence, and public advertisement routes without inferring plans or contacts.
+- Results are stored in the private versioned S3 catalog; user searches filter that catalog and never scrape source sites synchronously.
+- Coverage remains `partial`: NJSTART opportunities outside DPMC, local governments, schools, authorities, permits, and planning sources still require separate validated connectors.

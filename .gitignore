@@ -2,6 +2,7 @@
 
 # dependencies
 /node_modules
+**/node_modules/
 /.pnp
 .pnp.*
 .yarn/*
@@ -12,6 +13,8 @@
 
 # testing
 /coverage
+**/.vite/
+/.ruff_cache/
 
 # next.js
 /.next/
@@ -39,6 +42,12 @@ yarn-error.log*
 next-env.d.ts
 *.tsbuildinfo
 /dist/
+/frontend/dist/
+/infra/cdk.out/
+/infra/cdk-outputs.json
+/.pytest_cache/
+**/__pycache__/
+*.py[cod]
 /.wrangler/
 /outputs/
 /work/

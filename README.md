@@ -1,139 +1,579 @@
 # BidAtlas
 
-BidAtlas is a public-record construction intelligence system. It follows private residential, private commercial, and public projects from planning and design through permitting, bidding, bid opening, and award while retaining the official source for every record and document.
+BidAtlas is a public-record construction intelligence application. It helps users find construction opportunities, inspect the official evidence behind each record, follow projects before and during bidding, and keep internal bid notes.
 
-The dashboard is deliberately explicit: loaded counts are **not U.S. totals**. The authoritative 2025 Census baseline is 97,241 registry rows (91,438 independent local governments plus 5,803 dependent school-system/agency rows), and each applicable jurisdiction/source-class/lifecycle cell must be connected and current before national completeness can be claimed.
+The active application is a Vite/React single-page application backed by FastAPI and deployed in an isolated AWS serverless stack.
 
-## Implemented now
+> **Coverage rule:** Loaded records are records observed through connected public sources. They are not a claim of complete United States construction coverage. The application must preserve this distinction in its interface, APIs, and documentation.
 
-- Twenty base project adapters: Federal Permitting, USAspending construction awards, Caltrans advertised projects, SAM.gov (free API key required), Seattle building permits, Seattle/San Jose Legistar matters, New York City DOB filings, approved permits, and City Record procurement, New Jersey construction-permit activity, Los Angeles submitted building permits, Chicago building permits, Austin construction permits, San Francisco building permits, Tempe ArcGIS permits, Pittsburgh CKAN permits, Boston approved building permits, Miami iBuild plan-review permits, and Philadelphia L&I building, zoning, and trade-permit rows through Carto.
-- Publicly filed private-work coverage in the configured permit jurisdictions. Los Angeles, Boston, Miami, Philadelphia, New York City, Chicago, Austin, San Francisco, Seattle, Tempe, and Pittsburgh records can expose residential and commercial scope, use, address, value, lifecycle, or named participants when those literal fields are published. NYC approved-permit rows contribute a general contractor only when DOB explicitly publishes the permittee license type as `GC`; person-only owner and applicant names are suppressed. New Jersey's statewide activity feed is discovery-only because it omits address, work description, owner, and contractor fields, so the application links the user to the issuing municipal construction office instead of inferring those identities. A permit record is not evidence that plan sheets, CAD, homeowner details, or a bid opportunity are public.
-- A 51-state/DC source registry with 102 official statewide procurement and DOT letting roots.
-- An authenticated local-market Source Monitor for public procurement feeds, contractor/owner planrooms, and builders exchanges. It accepts bounded public HTTPS RSS, Atom, JSON Feed, and HTML listing sources; validates public DNS before every fetch and redirect; normalizes at most 100 postings per scan; and keeps incomplete records in a private review queue. A posting reaches the canonical Open bids index only when it has bid language, a current deadline, a location, an original source URL, and a plans/specifications route. Verified records retain publisher, contact, document, review, and source evidence, while rejected or expired records are removed from the actionable queue. Active monitors refresh from the scheduled Worker with bounded exponential retry.
-- A network-free portal classifier for Socrata, ArcGIS, CKAN, Carto, OpenGov, Bonfire, PlanetBids, BidNet, IonWave, DemandStar, Public Purchase, HTML, manual, and unknown roots. It records confidence and evidence, rejects credential-bearing URLs, and persists review-only discovery candidates as explicitly `unverified`, `not-connected`, and network-disabled. Automated rediscovery cannot overwrite a prior human review.
-- Product and location search with comma-separated phrases plus all/any/exact matching. Conservative source-field normalization makes categories such as `Dwelling - Single Family`, `1-2FAM`, ADU, `Comm`, retail, and warehouse discoverable through residential/commercial searches without treating agency/contact wording as a building classification. `/projects` remains bid-ready only; broader lifecycle and missing-evidence search belongs to `/leads`.
-- A separate `/leads` workspace for connected records that are not qualified Open bids. Its server-submitted, shareable filters expose planning, design, permitting, construction, expired, and incomplete procurement records; users can isolate missing owners, contractors, bid documents, deadlines, early stages, and archived lifecycle records without weakening the strict bid-ready gate on `/projects`.
-- Explicit lifecycle-stage filtering across planning, design/plan review, permitting, bidding, bid-opened, awarded, completed/closed, cancelled/inactive, and unclassified source records.
-- Explicit metadata-only versus extracted-document-text search coverage. A no-match never claims that a product is absent from unindexed plans.
-- D1 persistence for sources, projects, provenance, participants, document versions/extractions/chunks, per-source coverage evidence plus aggregate coverage cells, dataset candidates, ingestion runs, supplier profiles, and portal-registration tasks.
-- D1 FTS5 indexes for project metadata and page-aware document chunks.
-- A protected project-document pipeline for plans, specifications, addenda, drawings, CAD, bid forms, schedules, and reports. D1 stores provenance, rights, versions, hashes, processing state, and searchable metadata while R2 stores content-addressed bytes. HTTPS imports use bounded redirects, a whole-operation timeout, and fail-closed public-DNS checks; uploads require a bounded declared length before multipart buffering. Private files are owner-only, workspace files are shared only inside the authenticated workspace, R2 keys never leave the server, and anonymous download requires every public-license, redistribution, storage, and security gate. SHA-256 deduplication, internal-service-only extraction handoff, and metadata/extracted-text search are implemented. Automated OCR and native-CAD conversion remain separate sandboxed workers.
-- A conservative plan/spec contact parser is ready for page-aware extracted text. It accepts only explicit owner, architect, engineer, contractor, or agency labels and retains the exact page snippet plus document-version/extraction/chunk provenance. It does not promote plan holders, applicants, developers, or unlabeled names into project roles. The capability remains queued and persistence-disabled until a real document retrieval/extraction service populates `document_extractions` and `document_chunks`.
-- A scheduled Worker handler and protected `POST /api/internal/ingest` endpoint. Each run selects one configured project source, requests one bounded upstream page, and persists that source's next cursor only after the page has been fully materialized. Incremental scheduling separates historical backfill from refresh work. High-volume Seattle, Socrata, ArcGIS, CKAN, and Carto permit adapters seed a durable source-native refresh watermark from their newest official row, then query strictly forward from that sort-value/identity pair; tied timestamps page without gaps and an empty delta keeps the watermark. The refresh source still rotates after every page, while older adapter families retain independent continuations. The Worker configuration declares a five-minute trigger for the current 31-project-source queue (including official state DOT bid feeds for Washington, Illinois, Texas, New York, North Carolina, Iowa, statewide Florida, Virginia, Michigan, Ohio, and Pennsylvania), but this configured queue is not complete nationwide coverage, and production scheduling must also be enabled by the hosting control plane.
-- Source-native upstream paging for the pageable adapters: immutable ID keysets for Federal Permitting, full-history Seattle permits, eight configured Socrata feeds, and five ArcGIS/CKAN/Carto feeds; a frozen Legistar scan window plus `$skip`; USAspending `hasNext` plus `last_record` watermarks; and SAM page-index cursors over a frozen date window. D1-budget pauses retain the current project and its stable document list plus project/document offsets inside the current page, so the next run never applies an attachment offset to another record.
-- A public Tudelu supplier profile prefilled from the company website. Passwords, tax IDs, banking data, signatures, and verification codes are not stored in the project database.
-- An official Census workbook importer that maps 91,438 independent local governments plus 5,803 dependent school/agency rows (97,241 registry rows total) into D1.
-- A supplemental 19,482-row Vintage 2025 incorporated-place seed manifest for city-name discovery when the D1 registry is unavailable. It is not the jurisdiction denominator and is never counted as a connection.
-- One resumable jurisdiction-discovery job per active authoritative registry jurisdiction, with bounded leases, cursors, retries, and candidate provenance. Lease fairness finishes active source-class/page scans before untouched jobs and defers completed weekly rechecks until after untouched work; population priority and due time break ties inside those tiers. It uses the keyed GSA Data.gov v4 search when configured and the official public Data.gov catalog search endpoint as a no-key fallback, so a missing key no longer stops the queue. A completed catalog scan creates review candidates only; it does not mark a source connected. The current three-job batch is a conservative correctness scaffold, not a nationwide-speed rollout; production discovery must deduplicate work by publisher/portal/source family before daily national freshness is attainable.
-- Durable candidate-to-Census-jurisdiction links plus conservative exact city/county matching for ingested projects. Only unambiguous matches update per-jurisdiction lifecycle and document counts.
-- A Bid Desk with a research-to-delivery pipeline, project stakeholder graph, missing-role checklist, quote line items, scope/exclusions/lead-time terms, recipient-channel verification, internal release checklist, approval gate, text-package export, and authenticated private draft save/restore. Opening an exact configured record runs bounded official-source research when no fresh result exists; missing contacts, plans, and scope remain explicit gaps. Drafts are isolated by authenticated owner, client snapshots cannot overwrite canonical project data, and saving never sends or submits anything.
-- A durable D1 model for contacts, project-contact roles, saved searches, opportunities, versioned bid packages, attachments, recipients, immutable submission attempts, suppressions, enrichment requests, and activity events.
-- An optional Apollo professional-contact adapter that requires authenticated access, explicit credit confirmation, and a separate `APOLLO_ENRICHMENT_ENABLED=true` operator opt-in. Personal email, phone, and waterfall enrichment are disabled. No outbound email or procurement-portal submission connector is configured.
+## Documentation maintenance rule
 
-## Application routes
+> **Required for every future change:** Before changing BidAtlas, read this README, [`ARCHITECTURE.md`](ARCHITECTURE.md), and any relevant file in [`docs/`](docs/). If a change affects a workflow, route, API contract, data source, persistence rule, security boundary, environment variable, test command, deployment step, or AWS resource, update the corresponding documentation in the same change. Documentation and implementation must not be allowed to drift.
 
-- `/` - compact national overview and links into each work area.
-- `/projects` - qualified Open bids only: official bidding-stage records with a current deadline, location, bid facts, and a usable plans/specifications route.
-- `/leads` - all connected project records with explicit missing-evidence, stage, state, location, archive, and 10/25/50 paging filters. Filters and paging remain in a shareable server-rendered URL.
-- `/companies` - NY/NJ business-valued owner and contractor evidence plus bounded official New York registry verification.
-- `/documents?project=<project-id>&source=<source-id>` - separate plans/specifications/drawings/CAD library with metadata and extracted-text search, processing-state filters, 10/25/50 paging, official-URL import, and authenticated workspace upload. Search scope and paging are retained in the route URL.
-- `/bid-desk?project=<project-id>` - the selected project's controlled estimating and bid-package workspace.
-- `/coverage` - source health, state/DC coverage, and the paged jurisdiction explorer. Jurisdiction rows also support 10, 25, or 50 per page.
-- `/source-monitor` - authenticated registration, scanning, pausing, review, and publication for local public posting feeds and planrooms.
+Use this documentation checklist when opening or reviewing future work:
 
-The Projects page starts with the first server-paged D1/live result page, and every subsequent search uses `GET /api/search` against D1 plus deterministic live fallbacks. Totals include only materialized records that can actually be opened; source-reported record counts are displayed separately. Materialized D1 results no longer have a browser-side 200-record cap. Live records override a stored copy when the current connector window observes the same source ID; stored records outside that window remain an as-of-last-ingestion view and can lag a later stage, location, or status change. The direct Seattle source-search fallback remains a bounded 1,000-row window until source-native paging is integrated, and the UI warns when upstream matches exceed that window. Jurisdiction paging is performed by `GET /api/jurisdictions` against D1, with the place-seed manifest used only as an explicit fallback.
+1. Identify the user workflow and technical boundary being changed.
+2. Read the relevant sections of this README and `ARCHITECTURE.md` before editing code.
+3. Check the domain plans in `docs/` when the change concerns national coverage or company intelligence.
+4. Update route, endpoint, data-flow, security, testing, and deployment descriptions affected by the change.
+5. Run the documented verification commands and record any new operational caveat.
 
-The live NYC City Record universe keeps every current Procurement-section category—not only rows labeled Construction—because architecture, engineering, renovation, and building-product opportunities are also published as Services or Goods. Long-term and administrative/open-ended solicitations remain searchable, while unmistakable or aged placeholder dates are normalized out of the `today`, `7-days`, and `14-days` deadline buckets. City Record calendar timestamps are interpreted in `America/New_York`; project cards show the exact Eastern cutoff and only link a sign-in portal when that project record provides evidence for it.
+## Current deployment
 
-## APIs
+- Application: <https://d9ubnak81sn3g.cloudfront.net>
+- API documentation: <https://d9ubnak81sn3g.cloudfront.net/api/docs>
+- AWS region: `us-east-1`
+- CloudFormation stack: `BidAtlasStack`
 
-- `GET /api/projects` - current connected-source project view with provenance and coverage scope.
-- `GET /api/search?keywords=canopy,%22partition%20wall%22&match=any&location=Seattle&state=WA&due=7-days&page=1&limit=10` - multi-term metadata/document search with source-local `today`, `7-days`, and `14-days` deadline windows, bounded live fallbacks, exact materialized-result totals, and server-side paging. `limit` accepts 10, 25, or 50.
-- `GET /api/coverage` - source health and 51-state/DC coverage ledger.
-- `GET /api/source-registry` - official state procurement and DOT discovery roots.
-- `GET|POST|PUT /api/source-monitors` - authenticated, owner-scoped source-monitor listing, creation, and pause/resume controls.
-- `POST /api/source-monitors/<monitor-id>/scan` - safely fetch and normalize one owned public posting source, then return verified and review-queue counts.
-- `PATCH /api/source-monitors/candidates/<candidate-id>` - reject a discovered posting or complete its missing facts and publish it into the verified bid index.
-- `GET /api/jurisdictions?q=Seattle&state=WA&page=1&limit=10` - paged Census government/dependent-agency registry plus discovery and connection metrics. `limit` is capped at 50.
-- `POST /api/internal/ingest?mode=incremental` - protected background ingestion; advances at most one source page and may pause within that page at the D1 statement budget.
-- `POST /api/internal/ingest?mode=bootstrap` - protected bootstrap trigger using the same bounded source pages and persisted source, project, and document cursor guarantees.
-- `POST /api/internal/discover?limit=3` - protected, bounded jurisdiction catalog-discovery batch. Its results remain candidates until a source is verified and successfully ingested.
-- `GET /api/integrations` - capability flags only; no credentials or secrets.
-- `PUT|DELETE /api/integrations` - authenticated, owner-scoped, write-only API-key vault management for the allowlisted SAM.gov and Apollo providers. Stored keys are encrypted with AES-256-GCM and are never returned.
-- `POST /api/integrations` - optional, authenticated professional-person enrichment. Requires `confirmCreditUse: true` and a configured `APOLLO_API_KEY`.
-- `GET /api/documents/search?q=canopy&projectId=<project-id>&page=1&limit=10&public=1` - rights-aware document metadata and extracted-text search.
-- `POST /api/documents/import` - authenticated public-HTTPS metadata/byte import with provenance and rights fields.
-- `POST /api/documents/upload` - authenticated multipart upload into content-addressed R2 storage.
-- `GET /api/documents/<document-id>` and `/download` - protected metadata/version and byte retrieval; anonymous public access is allowed only when every redistribution and security gate passes.
-- `POST /api/documents/<document-id>/extractions` - internal-token-only, bounded page-aware text extraction handoff for an external OCR/CAD worker.
-- `GET|POST /api/bid-drafts` - authenticated, owner-isolated private bid-draft restore/save. It never creates a submission attempt or invokes an outbound connector.
+## Application workflow at a glance
 
-## Run locally
+```text
+Checked-in public-source snapshot seeds a private S3 catalog
+  -> Daily NJ refresh reads official DPMC and NJDOT pages
+  -> FastAPI checks the S3 catalog and indexes the latest version
+  -> User opens the React application through CloudFront
+  -> User searches open bids or explores earlier project leads
+  -> FastAPI filters, sorts, and paginates source-backed records
+  -> User verifies the official source and document routes
+  -> User opens a project in Bid Desk
+  -> Draft notes are stored in the device workspace in DynamoDB
+  -> Coverage and source views explain what is connected and what is missing
+```
 
-Requirements: Node.js 22.13 or newer.
+The AWS runtime remains snapshot-backed, but New Jersey is now the first migrated scheduled source group. EventBridge refreshes official DPMC construction advertisements and NJDOT advertised construction projects daily into a private versioned S3 catalog. The former connector network remains under `legacy/cloudflare` while other sources await migration to equivalent scheduled Python jobs.
 
-```bash
+## Complete runtime architecture
+
+```text
+Browser
+  |
+  v
+Amazon CloudFront
+  |
+  +-- Frontend route or static asset
+  |     |
+  |     +-- CloudFront SPA rewrite for extensionless routes
+  |     +-- Private S3 frontend bucket through Origin Access Control
+  |           +-- index.html: no-cache, no-store, must-revalidate
+  |           +-- hashed JS/CSS assets: one-year immutable cache
+  |
+  +-- /api/* or /health
+        |
+        v
+      API Gateway HTTP API
+        |
+        v
+      AWS Lambda, Python 3.12 x86-64
+        |
+        +-- Mangum ASGI adapter
+        +-- FastAPI application
+              |
+              +-- Catalog API
+              |     +-- ProjectCatalog
+              |     +-- five-minute S3 version check
+              |     +-- JurisdictionCatalog
+              |     +-- checked-in data-export fallback
+              |
+              +-- Workspace API
+                    +-- WorkspaceStore
+                    +-- DynamoDB in AWS
+                    +-- in-memory store during local tests
+
+Private, versioned S3 documents bucket
+  -> Provisioned for protected document content
+  -> Not yet used by the current React document-route workflow
+
+EventBridge daily schedule
+  -> New Jersey refresh Lambda
+  -> Official NJ DPMC and NJDOT public pages
+  -> Private, encrypted, versioned catalog S3 bucket
+```
+
+## Technology stack
+
+| Layer | Technology | Purpose |
+| --- | --- | --- |
+| Frontend framework | React 19 | Component-based browser interface |
+| Frontend routing | React Router 7 | Client-side route selection and URL state |
+| Frontend build | Vite 8 | Local development, asset bundling, and content hashing |
+| Frontend language | TypeScript 5.9 | Strict UI types and API contracts |
+| Frontend styling | Plain CSS | Responsive visual system without a runtime CSS framework |
+| Backend framework | FastAPI 0.116 | Typed HTTP API and generated OpenAPI documentation |
+| Lambda adapter | Mangum 0.19 | Translates API Gateway events into ASGI requests |
+| Backend language | Python 3.12 | Catalog, filtering, pagination, and workspace services |
+| Public catalog data | JSON exports and private versioned S3 | Checked-in deployment seed plus daily New Jersey refreshes |
+| Mutable state | Amazon DynamoDB | Device-workspace drafts and registered source monitors |
+| Document storage | Amazon S3 | Private, encrypted, versioned document-object boundary |
+| Frontend storage | Amazon S3 | Private static assets accessed only through CloudFront |
+| Edge delivery | Amazon CloudFront | HTTPS, SPA routing, security headers, and caching |
+| API ingress | API Gateway HTTP API | Public `/api/*` and `/health` routing to Lambda |
+| Compute | AWS Lambda | Serverless FastAPI runtime |
+| Infrastructure | AWS CDK 2 / CloudFormation | Reproducible AWS resource definitions and deployment |
+| Frontend tests | Vitest and Testing Library | React route and component behavior |
+| Backend tests | Pytest and FastAPI TestClient | API contracts and workspace persistence |
+| Static checks | ESLint, TypeScript, Ruff | Frontend, infrastructure, and Python validation |
+
+Exact dependency versions are pinned in `frontend/package.json`, `backend/requirements*.txt`, and `infra/package.json`.
+
+## Repository map
+
+```text
+BidAtlas/
+  frontend/
+    src/
+      api/                 Browser HTTP client and query serialization
+      components/          Shared navigation, cards, filters, and states
+      hooks/               Reusable API-loading behavior
+      pages/               Route-level React workflows
+      test/                Browser test setup
+      App.tsx              Route table
+      main.tsx             Browser entry point
+      styles.css           Shared responsive visual system
+      types.ts             Browser-side project and coverage contracts
+    index.html             Vite HTML entry point and social metadata
+    vite.config.ts         Local proxy, build, and test configuration
+
+  backend/
+    app/
+      api/
+        catalog.py         Read-only catalog and discovery endpoints
+        workspace.py       Draft, monitor, and integration endpoints
+      services/
+        catalog.py         Snapshot loading, filtering, paging, and aggregation
+        state.py           DynamoDB and local workspace persistence
+      config.py            Environment-derived runtime settings
+      dependencies.py      Cached service construction
+      main.py              FastAPI application and Lambda handler
+    tests/                 FastAPI contract tests
+    requirements.txt       Lambda runtime dependencies
+    requirements-dev.txt   Local development and test dependencies
+
+  data-export/
+    current-projects.json  Runtime project/source/coverage snapshot
+    source-registry.json   Runtime state/DC source registry
+    all_50_us_states_and_cities_2025.txt
+                           Runtime incorporated-place fallback
+    coverage.json          Exported coverage audit artifact
+    database-verification.json
+                           Source-database verification artifact
+    manifest.json          Export provenance and scope notes
+
+  infra/
+    bin/bidatlas.ts        CDK application entry point
+    lib/bidatlas-stack.ts  AWS resources, permissions, caching, and outputs
+    cdk.json               CDK bootstrap and application configuration
+
+  docs/
+    NATIONAL_BID_COVERAGE_PLAN.md
+                           National source-coverage plan and constraints
+    NY_NJ_PUBLIC_COMPANY_WORKFLOW.md
+                           NY/NJ company-evidence workflow
+
+  legacy/cloudflare/       Archived Next/Vinext, D1, R2, connector, and Worker code
+  ARCHITECTURE.md          Detailed component boundaries and design decisions
+```
+
+Generated directories such as `frontend/dist`, `infra/cdk.out`, caches, and installed dependencies are ignored and are not source-of-truth documentation.
+
+## User workflows
+
+### 1. Open the application
+
+1. The browser requests `/` or a direct route from CloudFront.
+2. CloudFront serves `index.html` from the private frontend bucket.
+3. Extensionless routes such as `/projects` are rewritten to `index.html` so browser refreshes work.
+4. React starts in `frontend/src/main.tsx`.
+5. `frontend/src/App.tsx` selects the page using React Router.
+6. `AppShell` renders global navigation, the coverage warning, and the footer.
+
+### 2. Search qualified open bids
+
+1. The user opens `/projects`.
+2. `ProjectResultsPage` reads filters from the URL so searches can be bookmarked or shared.
+3. The frontend calls `GET /api/search` with `readiness=bid-ready` and `freshness=actionable`.
+4. `ProjectCatalog` applies keyword, location, state, deadline, stage, freshness, archive, and readiness rules.
+5. A bid-ready result must be in the bidding stage, have a current deadline, and have at least one official document route.
+6. Results are deadline-sorted, paginated, and returned with snapshot and completeness metadata.
+7. Each card links to the official public source and the internal Bid Desk.
+
+### 3. Explore earlier project leads
+
+1. The user opens `/leads`.
+2. The same search endpoint is used without the bid-ready restriction.
+3. The user can filter planning, design, permitting, bidding, award, or construction records.
+4. Completed and cancelled records remain excluded unless a future workflow explicitly enables archived records.
+5. This keeps early intelligence separate from the stricter open-bid index.
+
+### 4. Review company evidence
+
+1. The user opens `/companies`.
+2. The frontend calls `GET /api/companies`.
+3. `ProjectCatalog.companies()` aggregates organizations named literally in project participants.
+4. Agency-only participants are excluded from the company list.
+5. Each company shows its role, connected project count, states, and sample project links.
+6. This is source-published evidence, not inferred ownership or contractor identity.
+
+### 5. Review document routes
+
+1. The user opens `/documents`, optionally with a project or text filter.
+2. The frontend calls `GET /api/documents/search`.
+3. FastAPI flattens project document references while preserving their project relationship.
+4. The UI displays document kind, access requirement, project title, and the official URL.
+5. Current production behavior links to official document routes; it does not upload or proxy document bytes.
+
+### 6. Build a bid draft
+
+1. The user selects a project and opens `/bid-desk?project=<id>`.
+2. The frontend loads the exact project with `GET /api/projects/{projectId}`.
+3. It shows official source details, documents, and published participants beside the internal draft form.
+4. The browser creates a random device workspace identifier and sends it as `X-BidAtlas-User`.
+5. `GET /api/bid-drafts?projectId=<id>` restores an existing draft.
+6. `POST /api/bid-drafts` stores scope, exclusions, notes, and an update timestamp.
+7. In AWS, `WorkspaceStore` writes the record to DynamoDB. Locally, it uses an in-memory store.
+
+The device identifier prevents accidental workspace mixing but is not authentication. Do not store confidential pricing, personal information, credentials, or submission secrets until an identity provider is added.
+
+### 7. Register a source for review
+
+1. The user opens `/source-monitor`.
+2. The frontend loads device-workspace monitors with `GET /api/source-monitors`.
+3. A submitted source must have a name and public `https://` URL.
+4. `POST /api/source-monitors` saves it with `pending-review` status.
+5. The current AWS runtime does not fetch, classify, scan, or publish that source automatically.
+6. The former scanning implementation remains under `legacy/cloudflare` as migration reference.
+
+### 8. Inspect integration status
+
+1. The user opens `/integrations`.
+2. The frontend calls `GET /api/integrations`.
+3. The API returns capability metadata for SAM.gov and Apollo without returning credentials.
+4. Both integrations remain disabled until their AWS runtime configuration and controlled workflows are implemented.
+
+### 9. Audit national coverage
+
+1. The user opens `/coverage`.
+2. The frontend calls `GET /api/coverage`.
+3. The page shows registry size, loaded records, connected and identified source groups, and national completeness.
+4. The state/DC matrix distinguishes identified, partial, and not-connected source classes.
+5. Official procurement and DOT links remain available for source-level verification.
+
+## Route, component, and API map
+
+| Browser route | Primary React page | API calls | Main purpose |
+| --- | --- | --- | --- |
+| `/` | `HomePage` | `GET /api/dashboard` | Product summary, metrics, sample records |
+| `/projects` | `ProjectsPage` -> `ProjectResultsPage` | `GET /api/search` | Strict, bid-ready opportunities |
+| `/leads` | `LeadsPage` -> `ProjectResultsPage` | `GET /api/search` | Broader connected project pipeline |
+| `/companies` | `CompaniesPage` | `GET /api/companies` | Source-published organization evidence |
+| `/documents` | `DocumentsPage` | `GET /api/documents/search` | Official document routes |
+| `/bid-desk` | `BidDeskPage` | `GET /api/projects/{id}`, `GET/POST /api/bid-drafts` | Evidence review and internal draft notes |
+| `/coverage` | `CoveragePage` | `GET /api/coverage` | State/DC connection ledger |
+| `/source-monitor` | `SourceMonitorPage` | `GET/POST /api/source-monitors` | Device-workspace source review queue |
+| `/integrations` | `IntegrationsPage` | `GET /api/integrations` | Connector capability status |
+| `/api/docs` | FastAPI Swagger UI | `GET /api/openapi.json` | Interactive API reference |
+
+## API map
+
+### Operations
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `GET` | `/health` | Service health check |
+| `GET` | `/api/meta` | Backend, snapshot, source, and completeness metadata |
+| `GET` | `/api/docs` | Swagger UI |
+| `GET` | `/api/openapi.json` | OpenAPI schema |
+
+### Catalog and discovery
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `GET` | `/api/dashboard` | Home-page feed, sources, coverage, inventory, and warnings |
+| `GET` | `/api/projects` | Current catalog feed |
+| `GET` | `/api/projects/{projectId}` | Exact project lookup |
+| `GET` | `/api/search` | Filtered and paged project search |
+| `GET` | `/api/coverage` | Coverage, inventory, sources, and warnings |
+| `GET` | `/api/source-registry` | State/DC procurement and DOT source registry |
+| `GET` | `/api/jurisdictions` | Incorporated-place fallback search |
+| `GET` | `/api/companies` | Aggregated source-published organizations |
+| `GET` | `/api/documents/search` | Flattened official document routes |
+
+`GET /api/search` accepts these principal parameters:
+
+- `keywords`: comma-separated terms or quoted phrases.
+- `location`: free-text location match across searchable fields.
+- `match`: `all`, `any`, or `exact`.
+- `stage`: a project lifecycle stage or `all`.
+- `state`: state code, state name, or `all`.
+- `due`: `all`, `today`, `7-days`, or `14-days`.
+- `freshness`: actionable, closed/inactive, or broad catalog mode.
+- `readiness`: `all` or `bid-ready`.
+- `includeArchived`: whether completed/cancelled stages may appear.
+- `page`: one-based page number.
+- `limit`: `10`, `25`, or `50`.
+
+### Workspace
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `GET` | `/api/bid-drafts?projectId=<id>` | Restore one device-workspace draft |
+| `POST` | `/api/bid-drafts` | Save one device-workspace draft |
+| `GET` | `/api/source-monitors` | List device-workspace source registrations |
+| `POST` | `/api/source-monitors` | Register a public HTTPS source for review |
+| `GET` | `/api/integrations` | Return connector capability metadata only |
+
+## Data workflow and contracts
+
+### Runtime snapshot loading
+
+FastAPI constructs services through cached dependencies in `backend/app/dependencies.py`. `ProjectCatalogProvider` starts with the packaged snapshot, checks the private S3 catalog at most every five minutes, and atomically replaces its in-memory `ProjectCatalog` only when the object version changes. A temporary S3 failure leaves the last good catalog in service.
+
+Runtime inputs are:
+
+- `data-export/current-projects.json`: projects, active sources, coverage summary, inventory, warnings, and generation timestamp.
+- `data-export/source-registry.json`: state/DC discovery roots and coverage context.
+- `data-export/all_50_us_states_and_cities_2025.txt`: incorporated-place fallback used by jurisdiction search.
+
+AWS also seeds these exports into the private catalog bucket. The daily New Jersey job replaces only the two New Jersey source partitions, recomputes inventory and coverage counts, and writes a new version of `current-projects.json`. It retains the previous records for an individual source when that source cannot be refreshed.
+
+The remaining files in `data-export` document export provenance and database verification but are not currently loaded by FastAPI.
+
+### Search behavior
+
+`ProjectCatalog` normalizes double-encoded punctuation inherited from the legacy export, indexes projects by ID, builds searchable text from official record fields, and applies filtering in memory. It does not infer facts missing from the source record.
+
+Project results keep the original source URL, source record ID, lifecycle stage, official document routes, published participants, value, location, and timestamps when available.
+
+### Workspace data model
+
+DynamoDB uses a composite primary key:
+
+```text
+owner                              recordKey                 payload
+<device-id>@device.bidatlas        draft#<project-id>        JSON bid draft
+<device-id>@device.bidatlas        monitor#<uuid>            JSON source monitor
+```
+
+Each stored payload receives an ISO 8601 `updatedAt` timestamp. The table uses on-demand billing, AWS-managed encryption, point-in-time recovery, and a retain policy.
+
+### Document boundary
+
+The AWS stack provisions a private, encrypted, versioned documents bucket and grants the FastAPI role read/write access. The active API does not yet expose upload or download endpoints, so the bucket is an infrastructure boundary for future protected ingestion rather than an active user workflow.
+
+## Frontend behavior
+
+- URL query parameters are the source of truth for project and company searches.
+- API requests are same-origin in local and deployed environments.
+- The browser HTTP boundary is centralized in `frontend/src/api/client.ts`.
+- The API base can be overridden with `VITE_API_BASE_URL`; the default is the current origin.
+- A random device workspace ID is stored in browser local storage and sent on API requests.
+- Loading, failure, empty, pagination, and evidence states use shared components.
+- The layout is responsive and includes reduced-motion handling.
+
+## Backend behavior
+
+- `backend/app/main.py` creates FastAPI, CORS, routers, `/health`, OpenAPI, and the Lambda handler.
+- API modules validate HTTP input and delegate business behavior to services.
+- Catalog services are immutable after loading.
+- The catalog provider refreshes the immutable view from S3 at a bounded five-minute cadence.
+- The New Jersey refresh Lambda accepts data only from the two allowlisted official `nj.gov` pages, enforces HTTPS, response-size limits, and official-host redirects, and runs daily.
+- Workspace writes use DynamoDB only when `BIDATLAS_WORKSPACE_TABLE` is configured.
+- Local development and tests use a thread-safe in-memory workspace store.
+- API errors use normal FastAPI status codes and JSON detail messages.
+
+## Environment variables
+
+| Variable | Used by | Purpose | Default |
+| --- | --- | --- | --- |
+| `VITE_API_BASE_URL` | Frontend build | Optional API origin override | Same origin |
+| `BIDATLAS_ENVIRONMENT` | FastAPI | Environment label | `development` |
+| `BIDATLAS_DATA_DIR` | FastAPI | Directory containing runtime export files | Repository `data-export/` |
+| `BIDATLAS_CATALOG_BUCKET` | FastAPI and refresh job | Private S3 bucket containing the current catalog | Packaged snapshot only when unset |
+| `BIDATLAS_CATALOG_KEY` | FastAPI and refresh job | S3 object key for the current project catalog | `current-projects.json` |
+| `BIDATLAS_CATALOG_REFRESH_SECONDS` | FastAPI | Minimum interval between S3 catalog version checks | `300` |
+| `BIDATLAS_WORKSPACE_TABLE` | FastAPI | DynamoDB table name | In-memory store when unset |
+| `BIDATLAS_DOCUMENTS_BUCKET` | FastAPI | Private documents bucket name | Unset locally |
+| `BIDATLAS_CORS_ORIGINS` | FastAPI | Comma-separated browser origins | `http://localhost:5173` |
+| `AWS_REGION` | CDK/AWS SDK | Deployment or runtime region | `us-east-1` through CDK |
+| `CDK_DEFAULT_ACCOUNT` | CDK | Target AWS account | Derived from AWS CLI credentials |
+| `CDK_DEFAULT_REGION` | CDK | Target AWS region | `AWS_REGION` or `us-east-1` |
+
+Do not commit `.env` files, API keys, access tokens, AWS credentials, customer data, bid pricing, or personal information.
+
+## Local development workflow
+
+Requirements:
+
+- Node.js 22.13 or newer
+- Python 3.12 or newer
+- Docker for Lambda dependency packaging during CDK synthesis/deployment
+- AWS CLI only when synthesizing against or deploying to AWS
+
+Install dependencies:
+
+```powershell
 npm install
+python -m pip install -r backend\requirements-dev.txt
+```
+
+Start React and FastAPI together:
+
+```powershell
 npm run dev
 ```
 
-To verify the production build locally, run `npm run build` and then
-`npm start`. The production start command includes a process-local Windows URL
-separator compatibility wrapper for Vinext's static-asset cache; it does not
-modify `node_modules` and is inert on POSIX hosts.
+Local endpoints:
 
-After the dev server creates its local D1 database, generate the Census registry SQL in a
-second terminal, apply every migration, and load the registry:
+- React: `http://localhost:5173`
+- FastAPI: `http://localhost:8000`
+- API docs: `http://localhost:8000/api/docs`
+- Health: `http://localhost:8000/health`
 
-```bash
-node scripts/import-census-jurisdictions.mjs --out outputs/census-jurisdictions.sql
-npm run db:local-bootstrap
+Vite proxies `/api` and `/health` to FastAPI, so frontend code uses the same relative URLs locally and in AWS.
+
+## Verification workflow
+
+Run the complete local verification set before deployment:
+
+```powershell
+npm test
+npm run lint
+npm run build
+npm audit --omit=dev
+npm run synth:aws
 ```
 
-Copy `.env.example` to `.env.local` and set any available free keys/secrets.
+What each command covers:
+
+- `npm test`: Vitest frontend tests followed by Pytest backend tests.
+- `npm run lint`: ESLint, infrastructure TypeScript type checking, and Ruff.
+- `npm run build`: strict TypeScript compilation and the Vite production build.
+- `npm audit --omit=dev`: dependencies shipped in the application runtime.
+- `npm run synth:aws`: frontend rebuild plus CDK/CloudFormation synthesis and Lambda packaging.
+
+After deployment, verify at minimum:
 
 ```text
-SAM_API_KEY=
-INGEST_TOKEN=
-DATA_GOV_API_KEY=
-APOLLO_API_KEY=
-APOLLO_ENRICHMENT_ENABLED=false
-BIDATLAS_INTERNAL_TOKEN=
+GET /
+GET /projects
+GET /health
+GET /api/meta
+GET /api/search?readiness=bid-ready&limit=10
+GET /api/docs
 ```
 
-## Verify
+Also verify:
 
-```bash
+- Direct frontend routes return `200` and `text/html`.
+- `index.html` returns `Cache-Control: no-cache, no-store, must-revalidate`.
+- Hashed JS/CSS assets return `Cache-Control: public, max-age=31536000, immutable`.
+- API routes return JSON rather than the React application.
+- CloudFormation reports `CREATE_COMPLETE` or `UPDATE_COMPLETE`.
+- CloudFront reports `Deployed` before announcing success.
+- A temporary draft can be written and restored through CloudFront, then removed from DynamoDB.
+
+## AWS deployment workflow
+
+Confirm the target account before making changes:
+
+```powershell
+aws sts get-caller-identity --region us-east-1
+```
+
+Review the infrastructure change:
+
+```powershell
 npm run build
-npm test
-npm run db:generate
-npm run db:validate
+Set-Location infra
+npx cdk diff BidAtlasStack --no-change-set
+Set-Location ..
 ```
 
-Inspect the current Census workbook, generate a Wrangler-compatible SQL import, or upload it directly through the authenticated Cloudflare D1 API:
+Deploy:
 
-```bash
-npm run registry:inspect
-node scripts/import-census-jurisdictions.mjs --out outputs/census-jurisdictions.sql
-node scripts/import-census-jurisdictions.mjs --upload
+```powershell
+npm run deploy:aws
 ```
 
-Audit or regenerate the supplemental incorporated-place seed manifest from the supplied text file:
+The deploy command builds the frontend and deploys `BidAtlasStack` without interactive approval. CDK packages only `backend/app`, runtime Python dependencies, and `data-export` into the Lambda asset.
 
-```bash
-npm run cities:audit -- --input /path/to/all_50_us_states_and_cities_2025.txt --out data/city-seeds-2025.json
-```
+### AWS resources
 
-Classify the existing 102 official state/DC roots into a deterministic review manifest. Supply the actual UTC time of the metadata review; unchanged rows retain their prior check time unless `--recheck-all` is explicitly added.
+`BidAtlasStack` owns:
 
-```bash
-npm run sources:classify -- --out outputs/jurisdiction-source-portals.json --checked-at 2026-07-16T12:00:00.000Z
-```
+- CloudFront distribution with SPA rewrite and API behaviors.
+- Private S3 frontend bucket with Origin Access Control.
+- API Gateway HTTP API.
+- Python 3.12 x86-64 Lambda function running FastAPI through Mangum.
+- DynamoDB workspace table using on-demand billing and point-in-time recovery.
+- Private, encrypted, versioned documents S3 bucket.
+- Private, encrypted, versioned catalog S3 bucket seeded from `data-export`.
+- Daily EventBridge rule and Python Lambda for official NJ DPMC and NJDOT refreshes.
+- CloudWatch API log group with one-week retention.
+- Deployment support resources and least-scope application IAM permissions.
 
-This command performs no portal requests and creates no live adapters. The generated candidates must go through ownership, terms, robots, public-access, rate-limit, and pagination review before implementation.
+The workspace table, documents bucket, and catalog bucket use `RETAIN`. The generated frontend bucket is disposable because it can be rebuilt from source. All resources carry the `Project=BidAtlas` tag and remain independent from the Canopy and Tudelu stacks.
 
-The supplied file has 19,482 rows across 50 states, excludes DC, and contains 11 state/name labels that are ambiguous because the text omits stable Census place identifiers. It is population-place geography, not a list of every public owner. The authoritative coverage registry remains the 97,241-row Government Units Survey import: 91,438 independent governments plus 5,803 dependent school-system/agency rows.
+### CloudFront routing and caching
 
-Direct upload requires `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_DATABASE_ID`, and a scoped `CLOUDFLARE_API_TOKEN` with D1 write permission.
+- Default behavior: private frontend S3 origin.
+- `api/*`: API Gateway origin, caching disabled, all API methods allowed.
+- `health`: API Gateway origin, caching disabled.
+- Extensionless frontend routes: rewritten to `/index.html` by a CloudFront Function.
+- `index.html`: no-cache, no-store, must-revalidate.
+- Hashed and static assets: public one-year immutable cache.
+- Frontend deployment waits for the `/*` invalidation to complete.
 
-See [ARCHITECTURE.md](ARCHITECTURE.md) for the coverage model, connector families, document/CAD boundaries, deduplication rules, and rollout plan. [COMPETITOR_PARITY.md](COMPETITOR_PARITY.md) maps the official ConstructConnect and PlanHub workflow capabilities to the BidAtlas implementation and safety boundaries.
+## Security boundaries and known limitations
+
+- S3 public access is blocked for the frontend, document, and catalog buckets.
+- CloudFront accesses frontend objects using Origin Access Control.
+- DynamoDB and S3 use encryption at rest.
+- Document objects are versioned and retained.
+- FastAPI receives only the permissions required for its workspace table, documents bucket, and read-only catalog access. The scheduled NJ job receives catalog read/write access only.
+- API responses do not expose integration credentials.
+- The API is publicly reachable through CloudFront and API Gateway.
+- Device workspace identifiers are pseudonymous isolation keys, not authenticated identities.
+- Source monitor registration does not currently fetch untrusted URLs.
+- Document upload, download, extraction, and rights enforcement are not active in the AWS API.
+- The catalog is still partial. Only NJ DPMC and NJDOT currently have scheduled AWS refreshes; New Jersey municipalities, counties, schools, authorities, NJSTART listings outside DPMC construction, permits, and planning sources are not yet connected.
+
+Before enabling confidential drafts, uploads, enrichment, or automated source fetching, add a real identity provider, authorization checks, request limits, data classification, audit logging, and endpoint-specific threat review.
+
+## Data freshness and migration status
+
+The deployed API serves the latest private S3 `current-projects.json`, falling back to the packaged `data-export/current-projects.json`. Its generation timestamp is returned by `/api/meta` and displayed in the product. Deployments seed the S3 object; the daily New Jersey job then refreshes DPMC and NJDOT records without requiring a site deployment.
+
+The previous implementation remains in `legacy/cloudflare` and includes:
+
+- Next/Vinext server-rendered pages and route handlers.
+- TypeScript public-source connectors.
+- Cloudflare Worker ingestion and jurisdiction discovery.
+- D1 schema, migrations, repositories, and full connector tests.
+- R2 document ingestion, extraction, and access-control workflows.
+
+Those files are reference material, not part of the active package scripts, Lambda asset, frontend build, or AWS runtime. Port connectors one bounded capability at a time into tested Python services or scheduled jobs; do not silently reconnect the legacy runtime.
+
+## Documentation index
+
+- [`README.md`](README.md): complete workflow, stack, operations, and maintenance contract.
+- [`ARCHITECTURE.md`](ARCHITECTURE.md): design goals, component boundaries, persistence model, and legacy boundary.
+- [`docs/NATIONAL_BID_COVERAGE_PLAN.md`](docs/NATIONAL_BID_COVERAGE_PLAN.md): national coverage strategy and completeness constraints.
+- [`docs/NY_NJ_PUBLIC_COMPANY_WORKFLOW.md`](docs/NY_NJ_PUBLIC_COMPANY_WORKFLOW.md): public company-evidence workflow for New York and New Jersey.
+- [`legacy/cloudflare/README.md`](legacy/cloudflare/README.md): scope and purpose of the archived implementation.
+
+## Future-change documentation matrix
+
+| Change type | Documentation that must be reviewed and updated |
+| --- | --- |
+| React route, page, navigation, or search behavior | This README route/workflow maps and relevant frontend notes |
+| API endpoint, parameter, response, or validation | This README API map, `ARCHITECTURE.md`, and FastAPI tests |
+| Search/readiness/freshness rule | User workflows, data contracts, coverage language, and backend tests |
+| Data source or connector | Data workflow, migration status, coverage plan, and source-specific docs |
+| DynamoDB key or payload | Persistence sections, security boundaries, and migration notes |
+| Authentication or authorization | Security sections, environment variables, workflows, and deployment docs |
+| S3 document behavior | Document workflow, rights/security notes, IAM map, and tests |
+| AWS resource, permission, cache, or route | Architecture diagram, AWS resource map, deployment and smoke checks |
+| Dependency, runtime, or build command | Technology stack, requirements, local setup, and verification workflow |
+| Production URL or environment | Current deployment, environment variables, and operations checks |
+
+If a future change cannot be accurately explained in the documentation, it is not ready to merge or deploy.
