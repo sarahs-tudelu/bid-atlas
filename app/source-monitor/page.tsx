@@ -26,6 +26,7 @@ export default async function SourceMonitorPage() {
         </Link>
         <nav aria-label="Source monitor navigation">
           <Link href="/projects">Open bids</Link>
+          <Link href="/companies">Companies</Link>
           <Link href="/bid-desk">Bid Desk</Link>
           <Link href="/coverage">Coverage</Link>
           <span aria-current="page">Source Monitor</span>

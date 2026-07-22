@@ -570,6 +570,7 @@ export function DashboardClient({
         <nav aria-label="Primary navigation">
           <Link className={view === "overview" ? "topbar-link-active" : undefined} href="/" aria-current={view === "overview" ? "page" : undefined}>Overview</Link>
           <Link className={view === "projects" ? "topbar-link-active" : undefined} href="/projects" aria-current={view === "projects" ? "page" : undefined}>Projects</Link>
+          <Link href="/companies">Companies</Link>
           <Link className={view === "documents" ? "topbar-link-active" : undefined} href="/documents" aria-current={view === "documents" ? "page" : undefined}>Documents</Link>
           <Link className={view === "bid-desk" ? "topbar-link-active" : undefined} href="/bid-desk" aria-current={view === "bid-desk" ? "page" : undefined}>Bid Desk</Link>
           <Link className={view === "coverage" ? "topbar-link-active" : undefined} href="/coverage" aria-current={view === "coverage" ? "page" : undefined}>Coverage</Link>
@@ -658,13 +659,18 @@ export function DashboardClient({
           <strong>Build a bid package</strong>
           <small>Review stakeholders, price a scope, and prepare a controlled delivery draft.</small>
         </Link>
-        <Link href="/documents">
+        <Link href="/companies">
           <span>03</span>
+          <strong>Find owners and contractors</strong>
+          <small>Search NY/NJ company-role evidence and verify businesses in official public registries.</small>
+        </Link>
+        <Link href="/documents">
+          <span>04</span>
           <strong>Search plans and specifications</strong>
           <small>Find product terms in verified metadata and lawfully extracted document text.</small>
         </Link>
         <Link href="/coverage">
-          <span>04</span>
+          <span>05</span>
           <strong>Audit source coverage</strong>
           <small>See active source adapters, known gaps, and the 51-state buildout ledger.</small>
         </Link>

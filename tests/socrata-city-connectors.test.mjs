@@ -23,6 +23,33 @@ const samples = {
     filing_date: "2020-01-01T00:00:00.000",
     current_status_date: "2020-01-02T00:00:00.000",
   },
+  "rbx6-tga4": {
+    ":id": "row-approved-permit",
+    job_filing_number: "B00000001-I1",
+    work_permit: "B00000001-AL",
+    permit_status: "Signed-off",
+    permittee_s_license_type: "GC",
+    applicant_license: "123456",
+    applicant_business_name: "Example Construction LLC",
+    owner_business_name: "Example Owner Holdings LLC",
+    job_description: "Signed-off approved permit remains queryable",
+    issued_date: "2020-01-02T00:00:00.000",
+    dobrundate: "2026-07-20T00:00:00.000",
+  },
+  "w9se-dmra": {
+    pk: "010100000001",
+    recordid: "00000001",
+    permitno: "P-1",
+    status: "C",
+    permitstatusdesc: "Certificate",
+    permitdate: "2020-01-01T00:00:00.000",
+    certdate: "2020-01-02T00:00:00.000",
+    permittype: "06",
+    permittypedesc: "Alteration",
+    muniname: "EXAMPLE CITY",
+    county: "MERCER",
+    processdate: "2026-07-20T00:00:00.000",
+  },
   "dg92-zbpx": {
     request_id: "20200102001",
     start_date: "2020-01-02T00:00:00.000",
@@ -79,6 +106,8 @@ const samples = {
 
 const datasetForSource = {
   "nyc-dob-now-job-filings": "w9ak-ipjd",
+  "nyc-dob-now-approved-permits": "rbx6-tga4",
+  "new-jersey-construction-permits": "w9se-dmra",
   "nyc-city-record-construction-procurement": "dg92-zbpx",
   "los-angeles-building-permits-submitted": "gwh9-jnip",
   "chicago-building-permits": "ydr8-5enu",
@@ -88,6 +117,8 @@ const datasetForSource = {
 
 const uniqueKeyForSource = {
   "nyc-dob-now-job-filings": ":id",
+  "nyc-dob-now-approved-permits": ":id",
+  "new-jersey-construction-permits": "pk",
   "nyc-city-record-construction-procurement": "request_id",
   "los-angeles-building-permits-submitted": "permit_nbr",
   "chicago-building-permits": "id",
@@ -98,6 +129,8 @@ const uniqueKeyForSource = {
 test("city Socrata backfills use stable keysets and retain terminal lifecycle states", async () => {
   assert.deepEqual(SOCRATA_CITY_SOURCE_IDS, [
     "nyc-dob-now-job-filings",
+    "nyc-dob-now-approved-permits",
+    "new-jersey-construction-permits",
     "nyc-city-record-construction-procurement",
     "los-angeles-building-permits-submitted",
     "chicago-building-permits",
@@ -112,7 +145,9 @@ test("city Socrata backfills use stable keysets and retain terminal lifecycle st
     } else {
       assert.equal(SOCRATA_CITY_SOURCE_TEMPLATES[sourceId].sourceClass, "permits");
       assert.ok(SOCRATA_CITY_SOURCE_TEMPLATES[sourceId].stages.includes("completed"));
-      assert.ok(SOCRATA_CITY_SOURCE_TEMPLATES[sourceId].stages.includes("cancelled"));
+      if (sourceId !== "new-jersey-construction-permits") {
+        assert.ok(SOCRATA_CITY_SOURCE_TEMPLATES[sourceId].stages.includes("cancelled"));
+      }
     }
   }
 
@@ -131,6 +166,8 @@ test("city Socrata backfills use stable keysets and retain terminal lifecycle st
   try {
     const expectedStatuses = [
       "Filing Withdrawn",
+      "Signed-off",
+      "Certificate",
       "Award",
       "Permit Finaled",
       "COMPLETE",
@@ -139,6 +176,8 @@ test("city Socrata backfills use stable keysets and retain terminal lifecycle st
     ];
     const expectedStages = [
       "cancelled",
+      "completed",
+      "completed",
       "awarded",
       "completed",
       "completed",
@@ -814,6 +853,92 @@ test("NYC DOB maps public business contacts, permit lifecycle, and records-reque
   }
 });
 
+test("NYC approved permits publish business owners and explicit GC permittees without exposing people", async () => {
+  const originalFetch = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = async (input) => {
+    const url = new URL(input instanceof Request ? input.url : String(input));
+    calls.push(url);
+    if (url.searchParams.get("$select") === "count(*) as count") {
+      return Response.json([{ count: "1" }]);
+    }
+    return Response.json([{
+      ...samples["rbx6-tga4"],
+      ":id": "row-gc-evidence",
+      permit_status: "Permit Issued",
+      owner_business_name: "Hudson Property Holdings LLC",
+      owner_name: "Private Owner Person",
+      applicant_business_name: "Hudson Construction Corp",
+      applicant_first_name: "Private",
+      applicant_last_name: "Permittee",
+      permittee_s_license_type: "GC",
+      applicant_license: "GC-991122",
+    }]);
+  };
+
+  try {
+    const result = await fetchSocrataCitySource("nyc-dob-now-approved-permits", {
+      mode: "ingest",
+      lane: "backfill",
+    });
+    const project = result.projects[0];
+    assert.equal(project.stage, "construction");
+    assert.ok(project.participants.some((participant) =>
+      participant.role === "owner" &&
+      participant.name === "Hudson Property Holdings LLC" &&
+      participant.sourceUrl === project.sourceUrl));
+    assert.ok(project.participants.some((participant) =>
+      participant.role === "contractor" &&
+      participant.name === "Hudson Construction Corp" &&
+      participant.sourceUrl === project.sourceUrl));
+    assert.doesNotMatch(JSON.stringify(project), /Private Owner Person|Private Permittee/);
+    assert.ok(project.searchableFields.includes("GC-991122"));
+    const rowCall = calls.find((call) => call.searchParams.get("$select") !== "count(*) as count");
+    assert.match(rowCall.searchParams.get("$where") ?? "", /issued_date is not null/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("New Jersey statewide permits preserve the municipal-record handoff without inventing an owner or contractor", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (input) => {
+    const url = new URL(input instanceof Request ? input.url : String(input));
+    return Response.json(
+      url.searchParams.get("$select") === "count(*) as count"
+        ? [{ count: "1" }]
+        : [{
+            ...samples["w9se-dmra"],
+            pk: "010100000003",
+            status: "P",
+            permitstatusdesc: "Permit",
+            permitno: "2026-0042",
+            constcost: "750000",
+            squarefeet: "12000",
+            usegroupdesc: "Business",
+          }],
+    );
+  };
+
+  try {
+    const result = await fetchSocrataCitySource("new-jersey-construction-permits", {
+      mode: "ingest",
+      lane: "backfill",
+    });
+    const project = result.projects[0];
+    assert.equal(project.stage, "permitting");
+    assert.equal(project.state, "NJ");
+    assert.equal(project.value, 750000);
+    assert.match(project.summary, /require the municipal permit record/i);
+    assert.deepEqual(project.participants.map(({ role }) => role), ["agency"]);
+    assert.ok(project.documents.some((document) =>
+      document.url.includes("muniroster.pdf") && document.kind === "source-record"));
+    assert.equal(project.participants.some(({ role }) => role === "owner" || role === "contractor"), false);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("NYC DOB exact lookup accepts only canonical Socrata row identities and never substitutes a filing", async () => {
   const originalFetch = globalThis.fetch;
   const calls = [];
@@ -875,6 +1000,18 @@ test("source-specific permit statuses do not turn active review into completed w
       job_filing_number: "B00000003-I1",
       filing_status: "Intent to Revoke",
     },
+    "rbx6-tga4": {
+      ...samples["rbx6-tga4"],
+      ":id": "row-issued-permit",
+      permit_status: "Permit Issued",
+    },
+    "w9se-dmra": {
+      ...samples["w9se-dmra"],
+      pk: "010100000002",
+      status: "P",
+      permitstatusdesc: "Permit",
+      certdate: undefined,
+    },
     "ydr8-5enu": {
       ...samples["ydr8-5enu"],
       id: "C2",
@@ -904,6 +1041,8 @@ test("source-specific permit statuses do not turn active review into completed w
   };
   const expectedStages = {
     "nyc-dob-now-job-filings": "design",
+    "nyc-dob-now-approved-permits": "construction",
+    "new-jersey-construction-permits": "permitting",
     "los-angeles-building-permits-submitted": "design",
     "chicago-building-permits": "permitting",
     "austin-issued-construction-permits": "cancelled",

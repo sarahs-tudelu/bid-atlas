@@ -27,6 +27,8 @@ const NYC_CITY_RECORD_LONG_DEADLINE_YEARS = 5;
 const NYC_CITY_RECORD_PROCUREMENT_BASE_WHERE = "section_name = 'Procurement'";
 const NYC_DOB_PLAN_RECORD_REQUEST_URL =
   "https://www.nyc.gov/assets/buildings/pdf/records_request_user_guide.pdf";
+const NJ_MUNICIPAL_CONSTRUCTION_CONTACTS_URL =
+  "https://www.nj.gov/dca/codes/publications/pdf_ora/muniroster.pdf";
 const NYC_DOB_ROW_ID = /^row-[a-z0-9._~-]{4,80}$/i;
 const NYC_DOB_TERMINAL_STATUSES = [
   "LOC Issued",
@@ -54,6 +56,8 @@ const NYC_DOB_ACTIVE_PRIVATE_WHERE = [
 
 export const SOCRATA_CITY_SOURCE_IDS = [
   "nyc-dob-now-job-filings",
+  "nyc-dob-now-approved-permits",
+  "new-jersey-construction-permits",
   "nyc-city-record-construction-procurement",
   "los-angeles-building-permits-submitted",
   "chicago-building-permits",
@@ -117,6 +121,36 @@ export const SOCRATA_CITY_SOURCE_TEMPLATES: Record<
     jurisdiction: "New York City, New York",
     note:
       "Official DOB NOW job-application rows; the source count is filing rows, not a count of unique buildings or projects. The live dashboard view is limited to non-terminal private residential and commercial construction filings, which can include old unresolved rows and therefore is not itself a freshness claim; ingestion retains lifecycle history so later completion or withdrawal is not hidden. Plans are not in Open Data and require the official DOB records-request process. This source excludes separately published electrical, elevator, and LAA job families.",
+  },
+  "nyc-dob-now-approved-permits": {
+    id: "nyc-dob-now-approved-permits",
+    name: "NYC DOB NOW approved construction permits",
+    owner: "New York City Department of Buildings",
+    level: "local",
+    sourceClass: "permits",
+    stages: ["construction", "completed", "cancelled", "unclassified"],
+    access: "open",
+    cadence: "Daily",
+    recordCountUnit: "rows",
+    url: "https://data.cityofnewyork.us/d/rbx6-tga4",
+    jurisdiction: "New York City, New York",
+    note:
+      "Official DOB NOW approved-permit rows. BidAtlas exposes only organization-valued owners and contractors; person-only owner and applicant names are suppressed. A contractor role requires a published GC permittee license type. Electrical, elevator, and limited-alteration permits are published by NYC in separate datasets.",
+  },
+  "new-jersey-construction-permits": {
+    id: "new-jersey-construction-permits",
+    name: "New Jersey construction permit activity",
+    owner: "New Jersey Department of Community Affairs",
+    level: "state",
+    sourceClass: "permits",
+    stages: ["permitting", "completed", "unclassified"],
+    access: "open",
+    cadence: "Monthly",
+    recordCountUnit: "rows",
+    url: "https://data.nj.gov/d/w9se-dmra",
+    jurisdiction: "New Jersey",
+    note:
+      "Official municipality-reported permit and certificate activity retained for 60 months. The statewide dataset intentionally omits property addresses, work descriptions, owner names, and contractor names. BidAtlas therefore uses it for project discovery and links to the issuing municipality for the underlying permit record instead of inferring private parties.",
   },
   "nyc-city-record-construction-procurement": {
     id: "nyc-city-record-construction-procurement",
@@ -339,7 +373,7 @@ function uniqueParticipants(
 }
 
 const ORGANIZATION_NAME_MARKER =
-  /\b(?:llc|l\.l\.c\.?|incorporated|inc\.?|corp(?:oration)?\.?|company|co\.?|lp|llp|pllc|pc|p\.c\.|architects|architecture|engineers|engineering|construction|builders?|department|agency|authority|university|college|school|district|county|city\s+of|state\s+of|group|studio|associates?|services|design|development|properties|partners|holdings)\b/i;
+  /\b(?:llc|l\.l\.c\.?|incorporated|inc\.?|corp(?:oration)?\.?|company|co\.?|lp|llp|pllc|pc|p\.c\.|architects|architecture|engineers|engineering|construction|contracting|contractors?|builders?|building|consulting|enterprises?|management|realty|department|agency|authority|university|college|school|district|county|city\s+of|state\s+of|group|studio|associates?|services|design|development|properties|partners|holdings)\b/i;
 
 function looksLikeOrganizationName(value: string): boolean {
   return ORGANIZATION_NAME_MARKER.test(value);
@@ -383,6 +417,19 @@ function permittingStage(
       return "construction";
     }
     if (/approved|permit|issued/.test(status)) return "permitting";
+    return "unclassified";
+  }
+
+  if (sourceId === "nyc-dob-now-approved-permits") {
+    if (/withdrawn|revoked|expired|cancelled|canceled/.test(status)) return "cancelled";
+    if (/signed off|complete|completed/.test(status)) return "completed";
+    if (/permit issued|issued|approved/.test(status)) return "construction";
+    return "unclassified";
+  }
+
+  if (sourceId === "new-jersey-construction-permits") {
+    if (/certificate|complete|completed/.test(status)) return "completed";
+    if (/permit|issued|active/.test(status)) return "permitting";
     return "unclassified";
   }
 
@@ -648,6 +695,199 @@ function mapNyc(row: SocrataRow): ProjectRecord {
       textValue(row, "proposed_dwelling_units"),
       firstPermitDate,
       ...workTypes,
+    ].filter((value): value is string => Boolean(value)),
+    documentTextIndexed: false,
+  };
+}
+
+function mapNycApprovedPermit(row: SocrataRow): ProjectRecord {
+  const sourceId = "nyc-dob-now-approved-permits" as const;
+  const rowId = requiredIdentity(row, ":id", sourceId);
+  const filingNumber = textValue(row, "job_filing_number") ?? "Filing number not published";
+  const workPermit = textValue(row, "work_permit") ?? filingNumber;
+  const status = textValue(row, "permit_status") ?? "Approved permit";
+  const description = safePlainText(textValue(row, "job_description"));
+  const sourceUrl = officialRowUrl(
+    "data.cityofnewyork.us",
+    "rbx6-tga4",
+    ":id",
+    rowId,
+  );
+  const address = compact(
+    [textValue(row, "house_no"), textValue(row, "street_name")],
+    " ",
+  );
+  const ownerBusiness = nycDobOrganizationName(row, "owner_business_name");
+  const applicantBusiness = nycDobOrganizationName(row, "applicant_business_name");
+  const licenseType = textValue(row, "permittee_s_license_type");
+  const licenseNumber = textValue(row, "applicant_license");
+  const isGeneralContractor = normalizedLifecycleStatus(licenseType) === "gc";
+  return {
+    id: `${sourceId}:${rowId}`,
+    sourceId,
+    sourceRecordId: rowId,
+    title: description ?? `NYC approved permit ${workPermit}`,
+    summary: compact([
+      filingNumber,
+      workPermit,
+      textValue(row, "work_type"),
+      address || undefined,
+      status,
+      isGeneralContractor && licenseNumber ? `GC license ${licenseNumber}` : undefined,
+    ]),
+    stage: permittingStage(sourceId, status),
+    status,
+    agency: "New York City Department of Buildings",
+    address: address || undefined,
+    city: "New York",
+    state: "NY",
+    postalCode: textValue(row, "zip_code"),
+    value: moneyValue(textValue(row, "estimated_job_costs")),
+    postedAt: isoDate(textValue(row, "issued_date") ?? textValue(row, "approved_date")),
+    updatedAt:
+      isoDate(
+        textValue(row, "dobrundate") ??
+          textValue(row, "issued_date") ??
+          textValue(row, "approved_date"),
+      ) ?? new Date(0).toISOString(),
+    sourceName: SOCRATA_CITY_SOURCE_TEMPLATES[sourceId].name,
+    sourceUrl,
+    provenance: "live-api",
+    confidence: "official",
+    documents: [
+      {
+        name: "Official DOB NOW approved-permit record",
+        kind: "permit",
+        url: sourceUrl,
+        access: "public",
+        indexStatus: "metadata-only",
+      },
+    ],
+    participants: uniqueParticipants([
+      {
+        name: "New York City Department of Buildings",
+        role: "agency",
+        participantType: "organization",
+        organization: "New York City Department of Buildings",
+        sourceUrl,
+      },
+      ownerBusiness
+        ? {
+            name: ownerBusiness,
+            role: "owner",
+            participantType: "organization",
+            organization: ownerBusiness,
+            sourceUrl,
+          }
+        : undefined,
+      applicantBusiness && isGeneralContractor
+        ? {
+            name: applicantBusiness,
+            role: "contractor",
+            participantType: "organization",
+            organization: applicantBusiness,
+            sourceUrl,
+          }
+        : undefined,
+    ]),
+    searchableFields: [
+      filingNumber,
+      workPermit,
+      description,
+      status,
+      address || undefined,
+      textValue(row, "borough"),
+      textValue(row, "work_type"),
+      ownerBusiness,
+      applicantBusiness,
+      licenseType,
+      licenseNumber,
+      textValue(row, "filing_reason"),
+    ].filter((value): value is string => Boolean(value)),
+    documentTextIndexed: false,
+  };
+}
+
+function mapNewJerseyPermit(row: SocrataRow): ProjectRecord {
+  const sourceId = "new-jersey-construction-permits" as const;
+  const rowId = requiredIdentity(row, "pk", sourceId);
+  const permitNumber = textValue(row, "permitno") ?? textValue(row, "recordid") ?? rowId;
+  const municipality = safePlainText(textValue(row, "muniname"), 160) ?? "New Jersey municipality";
+  const permitType = safePlainText(textValue(row, "permittypedesc"), 200) ?? "Construction permit";
+  const status = textValue(row, "permitstatusdesc") ?? textValue(row, "status") ?? "Permit";
+  const sourceUrl = officialRowUrl(
+    "data.nj.gov",
+    "w9se-dmra",
+    "pk",
+    rowId,
+  );
+  return {
+    id: `${sourceId}:${rowId}`,
+    sourceId,
+    sourceRecordId: rowId,
+    title: `${municipality} ${permitType.toLowerCase()} permit ${permitNumber}`,
+    summary: compact([
+      permitNumber,
+      permitType,
+      textValue(row, "usegroupdesc"),
+      textValue(row, "squarefeet") ? `${textValue(row, "squarefeet")} sq ft` : undefined,
+      "Owner, contractor, address, and work description require the municipal permit record",
+    ]),
+    stage: permittingStage(sourceId, status),
+    status,
+    agency: `${municipality} construction office`,
+    city: municipality,
+    county: textValue(row, "county"),
+    state: "NJ",
+    value: moneyValue(textValue(row, "constcost")),
+    postedAt: isoDate(textValue(row, "permitdate")),
+    updatedAt:
+      isoDate(
+        textValue(row, "processdate") ??
+          textValue(row, "certdate") ??
+          textValue(row, "permitdate"),
+      ) ?? new Date(0).toISOString(),
+    sourceName: SOCRATA_CITY_SOURCE_TEMPLATES[sourceId].name,
+    sourceUrl,
+    provenance: "live-api",
+    confidence: "official",
+    documents: [
+      {
+        name: "Official New Jersey permit activity row",
+        kind: "permit",
+        url: sourceUrl,
+        access: "public",
+        indexStatus: "metadata-only",
+      },
+      {
+        name: "Issuing municipal construction office directory",
+        kind: "source-record",
+        url: NJ_MUNICIPAL_CONSTRUCTION_CONTACTS_URL,
+        access: "public",
+        indexStatus: "metadata-only",
+      },
+    ],
+    participants: [
+      {
+        name: `${municipality} construction office`,
+        role: "agency",
+        participantType: "organization",
+        organization: `${municipality} construction office`,
+        sourceUrl: NJ_MUNICIPAL_CONSTRUCTION_CONTACTS_URL,
+      },
+    ],
+    searchableFields: [
+      permitNumber,
+      textValue(row, "recordid"),
+      textValue(row, "block"),
+      textValue(row, "lot"),
+      municipality,
+      textValue(row, "county"),
+      permitType,
+      textValue(row, "usegroup"),
+      textValue(row, "usegroupdesc"),
+      textValue(row, "censusdesc"),
+      textValue(row, "public"),
     ].filter((value): value is string => Boolean(value)),
     documentTextIndexed: false,
   };
@@ -1282,6 +1522,80 @@ const DEFINITIONS: Record<SocrataCitySourceId, SocrataCityDefinition> = {
       "green_roof_work_type_",
     ],
     map: mapNyc,
+  },
+  "nyc-dob-now-approved-permits": {
+    domain: "data.cityofnewyork.us",
+    datasetId: "rbx6-tga4",
+    uniqueKey: ":id",
+    uniqueKeyOrder: "opaque-source-order",
+    refreshSortKey: "dobrundate",
+    baseWhere:
+      "issued_date is not null AND job_filing_number not in ('Permit is no','Permit is not yet issued') AND work_permit not in ('Permit is no','Permit is not yet issued')",
+    viewWhere: "permit_status = 'Permit Issued'",
+    select: [
+      ":id",
+      "job_filing_number",
+      "work_permit",
+      "sequence_number",
+      "filing_reason",
+      "house_no",
+      "street_name",
+      "borough",
+      "zip_code",
+      "work_on_floor",
+      "work_type",
+      "permittee_s_license_type",
+      "applicant_license",
+      "applicant_business_name",
+      "filing_representative_business_name",
+      "approved_date",
+      "issued_date",
+      "expired_date",
+      "job_description",
+      "estimated_job_costs",
+      "owner_business_name",
+      "permit_status",
+      "tracking_number",
+      "dobrundate",
+    ],
+    map: mapNycApprovedPermit,
+  },
+  "new-jersey-construction-permits": {
+    domain: "data.nj.gov",
+    datasetId: "w9se-dmra",
+    uniqueKey: "pk",
+    refreshSortKey: "processdate",
+    viewWhere: "permitstatusdesc = 'Permit'",
+    select: [
+      "pk",
+      "comu",
+      "muniname",
+      "munitype",
+      "county",
+      "recordid",
+      "block",
+      "lot",
+      "permitno",
+      "status",
+      "permitstatusdesc",
+      "permitdate",
+      "certdate",
+      "permittype",
+      "permittypedesc",
+      "constcost",
+      "squarefeet",
+      "salegained",
+      "rentgained",
+      "usegroup",
+      "usegroupdesc",
+      "censusnumber",
+      "censusdesc",
+      "public",
+      "source",
+      "sourcedesc",
+      "processdate",
+    ],
+    map: mapNewJerseyPermit,
   },
   "nyc-city-record-construction-procurement": {
     domain: "data.cityofnewyork.us",
@@ -1921,12 +2235,15 @@ export async function lookupSocrataCityProject(
   }
   const rawRecordId = projectId.slice(sourceId.length + 1);
   if (
-    sourceId === "nyc-dob-now-job-filings" &&
+    (sourceId === "nyc-dob-now-job-filings" ||
+      sourceId === "nyc-dob-now-approved-permits") &&
     !NYC_DOB_ROW_ID.test(rawRecordId)
   ) {
     return null;
   }
-  const recordId = sourceId === "nyc-dob-now-job-filings"
+  const recordId =
+    sourceId === "nyc-dob-now-job-filings" ||
+    sourceId === "nyc-dob-now-approved-permits"
     ? rawRecordId
     : rawRecordId.trim();
   if (

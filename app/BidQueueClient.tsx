@@ -216,6 +216,7 @@ export function BidQueueClient({
         </Link>
         <nav aria-label="Primary navigation">
           <Link className="topbar-link-active" href="/projects">Open bids</Link>
+          <Link href="/companies">Companies</Link>
           <Link href="/bid-desk">Bid Desk</Link>
           <Link href="/coverage">Sources</Link>
           <Link href="/source-monitor">Monitor</Link>
