@@ -5,6 +5,12 @@ from typing import Any
 from ..config import settings
 from .ai_outreach import generate_ai_email, tudelu_signature
 from .canopy import score_project
+from .marketing_outreach import (
+    default_sales_reply_owner,
+    marketing_persona,
+    marketing_sender,
+    sales_reply_owner,
+)
 from .qualification import EMAIL, published_contacts
 
 
@@ -15,6 +21,8 @@ def generate_outreach_draft(
     *,
     personalize: bool = False,
     recipient: str = "",
+    sender_mode: str = "marketing",
+    reply_owner_email: str = "",
 ) -> dict[str, Any]:
     contacts = published_contacts(project)
     if not contacts:
@@ -29,10 +37,25 @@ def generate_outreach_draft(
     reference = str(project.get("sourceRecordId") or project.get("id") or "the project")
     title = str(project.get("title") or "this project").strip()
     canopy_fit = score_project(project)
+    if sender_mode not in {"marketing", "employee"}:
+        raise ValueError("Sender mode must be marketing or employee")
+    if sender_mode == "marketing":
+        draft_user = marketing_persona()
+        reply_owner = sales_reply_owner(reply_owner_email) or default_sales_reply_owner(
+            str(user.get("email") or "")
+        )
+        sender_email = marketing_sender()
+    else:
+        draft_user = user
+        reply_owner = {
+            "name": str(user.get("name") or "Tudelu employee"),
+            "email": str(user.get("email") or "").strip().lower(),
+        }
+        sender_email = reply_owner["email"]
     if personalize:
         generated = generate_ai_email(
             {**project, "canopyFit": canopy_fit},
-            user,
+            draft_user,
             contact,
             email_history,
         )
@@ -52,7 +75,7 @@ def generate_outreach_draft(
         )
         generated = {
             "subject": f"Canopy support for {reference}",
-            "body": f"{body}\n\n{tudelu_signature(user)}",
+            "body": f"{body}\n\n{tudelu_signature(draft_user)}",
         }
         generation = {"provider": "template"}
     return {
@@ -67,6 +90,10 @@ def generate_outreach_draft(
         "contacts": contacts,
         "canopyFit": canopy_fit,
         "generation": generation,
+        "senderMode": sender_mode,
+        "senderEmail": sender_email,
+        "replyOwnerEmail": reply_owner["email"],
+        "replyOwnerName": reply_owner["name"],
     }
 
 

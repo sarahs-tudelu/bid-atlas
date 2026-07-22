@@ -25,6 +25,7 @@ export class BidAtlasStack extends cdk.Stack {
     const googleClientSecretParameterName = this.node.tryGetContext("googleClientSecretParameterName") as string | undefined;
     const sessionSecretParameterName = this.node.tryGetContext("sessionSecretParameterName") as string | undefined;
     const anthropicApiKeyParameterName = this.node.tryGetContext("anthropicApiKeyParameterName") as string | undefined;
+    const instantlyApiTokenParameterName = this.node.tryGetContext("instantlyApiTokenParameterName") as string | undefined;
     const publicUrl = (this.node.tryGetContext("publicUrl") as string | undefined)?.replace(/\/$/, "")
       ?? "http://localhost:5173";
 
@@ -84,6 +85,8 @@ export class BidAtlasStack extends cdk.Stack {
           "frontend",
           "infra",
           "legacy",
+          "sam_dot_gov-main",
+          "tudelu-cold-outreach-main",
           "public",
           "data",
           "docs",
@@ -119,6 +122,7 @@ export class BidAtlasStack extends cdk.Stack {
         BIDATLAS_CORS_ORIGINS: publicUrl,
         BIDATLAS_SAM_ENABLED: samApiKeyParameterName ? "true" : "false",
         BIDATLAS_ANTHROPIC_MODEL: "claude-sonnet-4-6",
+        BIDATLAS_MARKETING_SENDER: "outreach@tudelugroup.com",
         ...(googleClientIdParameterName
           ? { BIDATLAS_GOOGLE_CLIENT_ID_PARAMETER: googleClientIdParameterName }
           : {}),
@@ -130,6 +134,9 @@ export class BidAtlasStack extends cdk.Stack {
           : {}),
         ...(anthropicApiKeyParameterName
           ? { BIDATLAS_ANTHROPIC_API_KEY_PARAMETER: anthropicApiKeyParameterName }
+          : {}),
+        ...(instantlyApiTokenParameterName
+          ? { BIDATLAS_INSTANTLY_API_TOKEN_PARAMETER: instantlyApiTokenParameterName }
           : {}),
       },
     });
@@ -143,6 +150,7 @@ export class BidAtlasStack extends cdk.Stack {
       googleClientSecretParameterName,
       sessionSecretParameterName,
       anthropicApiKeyParameterName,
+      instantlyApiTokenParameterName,
     ].filter((name): name is string => Boolean(name));
     if (apiSecretParameters.length) {
       apiFunction.addToRolePolicy(new iam.PolicyStatement({
@@ -175,6 +183,8 @@ export class BidAtlasStack extends cdk.Stack {
           "frontend",
           "infra",
           "legacy",
+          "sam_dot_gov-main",
+          "tudelu-cold-outreach-main",
           "public",
           "data",
           "docs",
@@ -232,6 +242,76 @@ export class BidAtlasStack extends cdk.Stack {
         }),
       ],
     });
+
+    let marketingReplySyncFunction: lambda.Function | undefined;
+    if (instantlyApiTokenParameterName) {
+      marketingReplySyncFunction = new lambda.Function(this, "MarketingReplySyncFunction", {
+        runtime: lambda.Runtime.PYTHON_3_12,
+        architecture: lambda.Architecture.X86_64,
+        handler: "app.jobs.sync_marketing_replies.handler",
+        memorySize: 512,
+        timeout: cdk.Duration.minutes(2),
+        logGroup: new logs.LogGroup(this, "MarketingReplySyncLogGroup", {
+          retention: logs.RetentionDays.ONE_WEEK,
+          removalPolicy: cdk.RemovalPolicy.DESTROY,
+        }),
+        code: lambda.Code.fromAsset(repositoryRoot, {
+          exclude: [
+            ".git",
+            ".openai",
+            ".vinext",
+            ".wrangler",
+            "node_modules",
+            "frontend",
+            "infra",
+            "legacy",
+            "sam_dot_gov-main",
+            "tudelu-cold-outreach-main",
+            "public",
+            "data",
+            "docs",
+            "outputs",
+            "work",
+            ".env*",
+            "*.md",
+            "package*.json",
+          ],
+          bundling: {
+            image: lambda.Runtime.PYTHON_3_12.bundlingImage,
+            command: [
+              "bash",
+              "-c",
+              [
+                "pip install -r backend/requirements.txt -t /asset-output",
+                "cp -r backend/app /asset-output/app",
+              ].join(" && "),
+            ],
+          },
+        }),
+        environment: {
+          BIDATLAS_ENVIRONMENT: "production",
+          BIDATLAS_WORKSPACE_TABLE: workspaceTable.tableName,
+          BIDATLAS_MARKETING_SENDER: "outreach@tudelugroup.com",
+          BIDATLAS_INSTANTLY_API_TOKEN_PARAMETER: instantlyApiTokenParameterName,
+        },
+      });
+      workspaceTable.grantReadWriteData(marketingReplySyncFunction);
+      marketingReplySyncFunction.addToRolePolicy(new iam.PolicyStatement({
+        actions: ["ssm:GetParameter"],
+        resources: [
+          cdk.Stack.of(this).formatArn({
+            service: "ssm",
+            resource: "parameter",
+            resourceName: instantlyApiTokenParameterName.replace(/^\/+/, ""),
+          }),
+        ],
+      }));
+      new events.Rule(this, "MarketingReplySyncSchedule", {
+        description: "Forward BidAtlas marketing-mailbox replies to their assigned Tudelu sales owners.",
+        schedule: events.Schedule.rate(cdk.Duration.minutes(5)),
+        targets: [new targets.LambdaFunction(marketingReplySyncFunction, { retryAttempts: 2 })],
+      });
+    }
 
     const httpApi = new apigateway.HttpApi(this, "HttpApi", {
       apiName: "bidatlas-api",
@@ -331,5 +411,10 @@ function handler(event) {
     new cdk.CfnOutput(this, "NationalRefreshFunctionName", {
       value: nationalRefreshFunction.functionName,
     });
+    if (marketingReplySyncFunction) {
+      new cdk.CfnOutput(this, "MarketingReplySyncFunctionName", {
+        value: marketingReplySyncFunction.functionName,
+      });
+    }
   }
 }

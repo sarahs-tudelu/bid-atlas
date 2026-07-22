@@ -84,6 +84,11 @@ export interface OutreachDraft {
   updatedAt?: string;
   sentAt?: string;
   sentBy?: string;
+  senderMode: "marketing" | "employee";
+  senderEmail: string;
+  replyOwnerEmail: string;
+  replyOwnerName: string;
+  deliveryProvider?: "instantly:test-email" | "gmail";
   gmailMessageId?: string;
   gmailThreadId?: string;
   emailHistory?: GmailThreadSummary[];
@@ -92,6 +97,14 @@ export interface OutreachDraft {
     provider: "template" | "anthropic";
     model?: string;
   };
+}
+
+export interface OutreachConfig {
+  defaultSenderMode: "marketing";
+  marketing: { configured: boolean; email: string; name: string };
+  employee: { email: string; name: string };
+  salesReplyOwners: Array<{ email: string; name: string }>;
+  defaultReplyOwnerEmail: string;
 }
 
 export interface Project {

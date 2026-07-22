@@ -8,6 +8,11 @@ from backend.app.api.auth import require_user
 from backend.app.dependencies import get_catalog, get_workspace_store
 from backend.app.main import app
 from backend.app.services.canopy import score_project, score_text
+from backend.app.services.marketing_outreach import (
+    MARKETING_OWNER,
+    marketing_route_key,
+    marketing_sender,
+)
 from backend.app.services.qualification import (
     is_contactable_canopy_project,
     published_contacts,
@@ -37,6 +42,8 @@ def _fake_generated_draft(
     *,
     personalize: bool = False,
     recipient: str = "",
+    sender_mode: str = "marketing",
+    reply_owner_email: str = "",
 ) -> dict:
     contacts = published_contacts(project)
     contact = contacts[0]
@@ -56,6 +63,14 @@ def _fake_generated_draft(
             if personalize
             else {"provider": "template"}
         ),
+        "senderMode": sender_mode,
+        "senderEmail": marketing_sender() if sender_mode == "marketing" else user["email"],
+        "replyOwnerEmail": (
+            reply_owner_email
+            if sender_mode == "marketing" and reply_owner_email
+            else "jessica@tudelu.com" if sender_mode == "marketing" else user["email"]
+        ),
+        "replyOwnerName": "Jessica Rigolosi" if sender_mode == "marketing" else user["name"],
     }
 
 
@@ -105,7 +120,82 @@ def test_search_presets_and_profile_results_include_fit_evidence() -> None:
     assert all(project["canopyFit"]["score"] >= 8 for project in response.json()["projects"])
 
 
+def test_outreach_config_defaults_to_marketing_and_limits_reply_owners(monkeypatch) -> None:
+    monkeypatch.setattr(outreach_api, "instantly_is_configured", lambda: True)
+
+    response = client.get("/api/outreach/config")
+
+    assert response.status_code == 200
+    config = response.json()
+    assert config["defaultSenderMode"] == "marketing"
+    assert config["marketing"] == {
+        "configured": True,
+        "email": "outreach@tudelugroup.com",
+        "name": "Alex Turner",
+    }
+    assert config["employee"]["email"] == TEST_USER["email"]
+    assert config["defaultReplyOwnerEmail"] == "jessica@tudelu.com"
+    assert {owner["email"] for owner in config["salesReplyOwners"]} == {
+        "jadalyn.gaines@tudelu.com",
+        "patrick.may@tudelu.com",
+        "jessica@tudelu.com",
+        "abe@tudelu.com",
+        "shlomo.h@tudelu.com",
+    }
+
+
 def test_outreach_draft_save_and_sent_history_round_trip(monkeypatch) -> None:
+    catalog = get_catalog()
+    project = next(
+        project
+        for project in catalog.projects
+        if any(participant.get("email") for participant in project.get("participants", []))
+    )
+    store = get_workspace_store()
+    store.delete(TEST_USER["email"], f"outreach#{project['id']}")
+    store.put(TEST_USER["email"], "google#account", {"email": TEST_USER["email"], "accessToken": "test"})
+    recipient = published_contacts(project)[0]["email"]
+    store.delete(MARKETING_OWNER, marketing_route_key(recipient))
+    monkeypatch.setattr(outreach_api, "gmail_history", lambda *args, **kwargs: [])
+    monkeypatch.setattr(outreach_api, "generate_outreach_draft", _fake_generated_draft)
+    monkeypatch.setattr(
+        outreach_api,
+        "send_marketing_email",
+        lambda **kwargs: {"provider": "instantly:test-email", "sender": marketing_sender()},
+    )
+
+    generated = client.post(
+        "/api/outreach/generate",
+        json={"projectId": project["id"]},
+    )
+    assert generated.status_code == 200
+    draft = generated.json()["draft"]
+    assert draft["to"]
+    assert draft["subject"]
+    assert "Tudelu" in draft["body"]
+    assert draft["generation"]["provider"] == "template"
+    assert draft["senderMode"] == "marketing"
+    assert draft["senderEmail"] == marketing_sender()
+
+    draft["subject"] = f"Reviewed: {draft['subject']}"
+    saved = client.put("/api/outreach/draft", json=draft)
+    assert saved.status_code == 200
+    assert saved.json()["draft"]["subject"].startswith("Reviewed:")
+
+    sent = client.post("/api/outreach/send", json=saved.json()["draft"])
+    assert sent.status_code == 200
+    assert sent.json()["draft"]["status"] == "sent"
+    assert sent.json()["draft"]["sentAt"]
+    assert sent.json()["draft"]["sentBy"] == TEST_USER["email"]
+    assert sent.json()["draft"]["deliveryProvider"] == "instantly:test-email"
+    assert sent.json()["draft"]["replyOwnerEmail"] == "jessica@tudelu.com"
+
+    history = client.get("/api/outreach/history")
+    assert history.status_code == 200
+    assert history.json()["history"][0]["projectId"] == project["id"]
+
+
+def test_employee_sender_remains_available_through_logged_in_gmail(monkeypatch) -> None:
     catalog = get_catalog()
     project = next(
         project
@@ -125,30 +215,17 @@ def test_outreach_draft_save_and_sent_history_round_trip(monkeypatch) -> None:
 
     generated = client.post(
         "/api/outreach/generate",
-        json={"projectId": project["id"]},
+        json={"projectId": project["id"], "senderMode": "employee", "regenerate": True},
     )
     assert generated.status_code == 200
     draft = generated.json()["draft"]
-    assert draft["to"]
-    assert draft["subject"]
-    assert "Tudelu" in draft["body"]
-    assert draft["generation"]["provider"] == "template"
+    assert draft["senderEmail"] == TEST_USER["email"]
+    sent = client.post("/api/outreach/send", json=draft)
 
-    draft["subject"] = f"Reviewed: {draft['subject']}"
-    saved = client.put("/api/outreach/draft", json=draft)
-    assert saved.status_code == 200
-    assert saved.json()["draft"]["subject"].startswith("Reviewed:")
-
-    sent = client.post("/api/outreach/send", json=saved.json()["draft"])
     assert sent.status_code == 200
-    assert sent.json()["draft"]["status"] == "sent"
-    assert sent.json()["draft"]["sentAt"]
-    assert sent.json()["draft"]["sentBy"] == TEST_USER["email"]
+    assert sent.json()["draft"]["deliveryProvider"] == "gmail"
     assert sent.json()["draft"]["gmailMessageId"] == "gmail-message-1"
-
-    history = client.get("/api/outreach/history")
-    assert history.status_code == 200
-    assert history.json()["history"][0]["projectId"] == project["id"]
+    assert sent.json()["draft"]["replyOwnerEmail"] == TEST_USER["email"]
 
 
 def test_outreach_rejects_recipient_not_published_by_source(monkeypatch) -> None:

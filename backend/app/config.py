@@ -30,6 +30,9 @@ class Settings:
     anthropic_api_key: str | None
     anthropic_api_key_parameter: str | None
     anthropic_model: str
+    instantly_api_token: str | None
+    instantly_api_token_parameter: str | None
+    marketing_sender: str
 
 
 def load_settings() -> Settings:
@@ -80,6 +83,12 @@ def load_settings() -> Settings:
         anthropic_api_key=os.getenv("BIDATLAS_ANTHROPIC_API_KEY") or os.getenv("ANTHROPIC_API_KEY") or None,
         anthropic_api_key_parameter=os.getenv("BIDATLAS_ANTHROPIC_API_KEY_PARAMETER") or None,
         anthropic_model=os.getenv("BIDATLAS_ANTHROPIC_MODEL", "claude-sonnet-4-6"),
+        instantly_api_token=os.getenv("BIDATLAS_INSTANTLY_API_TOKEN") or None,
+        instantly_api_token_parameter=os.getenv("BIDATLAS_INSTANTLY_API_TOKEN_PARAMETER") or None,
+        marketing_sender=os.getenv(
+            "BIDATLAS_MARKETING_SENDER",
+            "outreach@tudelugroup.com",
+        ).strip().lower(),
     )
 
 

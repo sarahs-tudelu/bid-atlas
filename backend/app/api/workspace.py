@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from ..config import settings
 from ..dependencies import get_workspace_store
 from ..services.google import oauth_is_configured
+from ..services.marketing_outreach import instantly_is_configured, marketing_sender
 from ..services.state import WorkspaceStore
 from .auth import require_user
 
@@ -77,6 +78,12 @@ def integrations() -> dict[str, Any]:
                 "name": "Google Gmail",
                 "configured": oauth_is_configured(),
                 "detail": "Verified Tudelu login, published-contact history, and reviewed sending from the signed-in mailbox.",
+            },
+            {
+                "id": "instantly",
+                "name": "Instantly marketing mailbox",
+                "configured": instantly_is_configured(),
+                "detail": f"Default reviewed sending from {marketing_sender()} with scheduled reply forwarding to the assigned sales owner.",
             },
             {
                 "id": "sam",

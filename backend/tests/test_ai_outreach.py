@@ -36,6 +36,21 @@ def test_default_email_is_signed_without_calling_anthropic(monkeypatch) -> None:
     assert draft["generation"] == {"provider": "template"}
     assert "Architectural canopy replacement" in draft["body"]
     assert draft["body"].endswith(
+        "Best regards,\nAlex\nBusiness Development | Tudelu\n"
+        "718-782-7882\ntudelu.com"
+    )
+
+
+def test_employee_email_uses_verified_employee_signature() -> None:
+    draft = outreach_service.generate_outreach_draft(
+        PROJECT,
+        USER,
+        [],
+        sender_mode="employee",
+    )
+
+    assert draft["senderEmail"] == USER["email"]
+    assert draft["body"].endswith(
         "Best regards,\nJessica Example\nBusiness Development | Tudelu\n"
         "718-782-7882 ext. 116\ntudelu.com"
     )

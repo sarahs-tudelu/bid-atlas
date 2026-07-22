@@ -1,6 +1,6 @@
 # BidAtlas architecture
 
-This document describes the active React/FastAPI/AWS implementation. The complete operator and user workflow is in [`README.md`](README.md); source expansion policy is in [`docs/NATIONAL_BID_COVERAGE_PLAN.md`](docs/NATIONAL_BID_COVERAGE_PLAN.md).
+This document describes the active React/FastAPI/AWS implementation. The complete operator and user workflow is in [`README.md`](README.md); source expansion policy is in [`docs/NATIONAL_BID_COVERAGE_PLAN.md`](docs/NATIONAL_BID_COVERAGE_PLAN.md); marketing identity and reply-routing policy is in [`docs/COLD_OUTREACH_INTEGRATION.md`](docs/COLD_OUTREACH_INTEGRATION.md).
 
 > Architecture changes are incomplete until this document, the README, relevant domain docs, tests, and deployment configuration agree.
 
@@ -9,7 +9,7 @@ This document describes the active React/FastAPI/AWS implementation. The complet
 1. Show actionable Canopy opportunities rather than a noisy construction dump.
 2. Preserve a verifiable official-source trail and honest coverage reporting.
 3. Authenticate internal work with a verified Tudelu identity.
-4. Send only reviewed messages from the signed-in user’s Gmail account.
+4. Default reviewed outreach to the designated marketing mailbox while preserving an explicit signed-in employee Gmail option.
 5. Make arbitrary-recipient relay, duplicate sending, and cross-user workspace access impossible through the normal API contract.
 6. Keep runtime secrets out of Git, Lambda environment values, frontend bundles, logs, and CloudFormation templates.
 7. Keep one independently deployable AWS serverless stack.
@@ -17,9 +17,9 @@ This document describes the active React/FastAPI/AWS implementation. The complet
 ## System context
 
 ```text
-                   Google OAuth / Gmail API     Anthropic Messages API
-                              ^                         ^
-                              |                         |
+          Google OAuth / Gmail API   Anthropic Messages API   Instantly API
+                        ^                      ^                    ^
+                        |                      |                    |
 Tudelu browser -> CloudFront -> API Gateway -> FastAPI Lambda
        |              |                              |
        |              +-> private frontend S3       +-> DynamoDB workspace
@@ -29,6 +29,8 @@ React authenticated SPA
 
 EventBridge -> National refresh Lambda -> regional official sources + nationwide SAM.gov API
                                       -> versioned catalog S3
+EventBridge -> Marketing reply-sync Lambda -> Instantly received mail
+                                          -> designated Tudelu sales owner
 ```
 
 CloudFront makes the frontend and API same-origin. The default behavior serves the SPA from private S3 through Origin Access Control. `/api/*` and `/health` use a caching-disabled API Gateway origin and forward viewer cookies. Extensionless SPA rewriting is attached only to the frontend behavior, so API callbacks are never rewritten to `index.html`.
@@ -60,18 +62,25 @@ The state cookie lasts 10 minutes. The application session lasts 12 hours and is
 
 Gmail access is restricted to the configured `gmail.readonly` and `gmail.send` scopes. History normalization discards bodies and stores only headers, short snippets, and provider IDs. Sending uses `users/me/messages/send`, so the authenticated mailbox is the sender.
 
+### Instantly provider boundary
+
+Marketing mode is the default, but no provider call occurs until the authenticated employee reviews and confirms a draft. The API Lambda can send only through the configured `outreach@tudelugroup.com` account. The browser cannot provide another marketing sender, arbitrary reply owner, or provider token. A cross-user recipient lock and 14-day cooldown protect the shared identity.
+
+The scheduled reply Lambda polls received messages for that same account, matches the prospect and timestamp to an existing BidAtlas route, suppresses provider-marked or deterministic automatic replies, and forwards human responses to the designated sales owner with the prospect address as Reply-To. It stores only a bounded snippet, provider ID, routing metadata, and forwarding status. A provider reply ID is processed once unless a recorded forwarding attempt failed.
+
 ### Anthropic provider boundary
 
-The API Lambda alone can decrypt the Anthropic key. Initial email generation does not call Anthropic; it creates a deterministic signed template. Only `personalize: true` sends Claude a bounded project-facts object and at most 20 Gmail metadata/snippet records; full bodies and Gmail provider IDs are excluded. Prompts label source and Gmail material as untrusted data. Claude supplies only editable subject/body text and cannot select a recipient, choose a sender, access OAuth tokens, or send mail. FastAPI appends the verified rep’s Tudelu signature after generation.
+The API Lambda alone can decrypt the Anthropic key. Initial email generation does not call Anthropic; it creates a deterministic signed template. Only `personalize: true` sends Claude a bounded project-facts object and at most 20 minimized contact-history records; full bodies and provider IDs are excluded. Prompts label source and message material as untrusted data. Claude supplies only editable subject/body text and cannot select a recipient, sender, reply owner, access tokens, or send mail. FastAPI appends the approved Alex marketing signoff or verified employee’s Tudelu signature after generation.
 
 ### AWS secret boundary
 
-Parameter Store contains five SecureStrings. Lambda environment variables contain only their names. IAM resources are exact parameter ARNs:
+Parameter Store contains six SecureStrings. Lambda environment variables contain only their names. IAM resources are exact parameter ARNs:
 
 | Consumer | Parameters |
 | --- | --- |
-| API Lambda | Google client ID, Google client secret, session secret, Anthropic API key |
+| API Lambda | Google client ID, Google client secret, session secret, Anthropic API key, Instantly token |
 | Refresh Lambda | SAM.gov API key |
+| Marketing reply-sync Lambda | Instantly token |
 
 The Google client ID is not intrinsically confidential, but it follows the same promotion and configuration workflow to avoid coupling deployment to a local ignored file.
 
@@ -121,39 +130,44 @@ The CT/RI connector includes a narrowly scoped, checksum-pinned Thawte intermedi
 ## Outreach sequence
 
 ```text
-React             FastAPI              DynamoDB             Gmail        Claude
-  | generate         |                     |                   |             |
-  |----------------->| load admitted       |                   |             |
-  |                  | project/account --->|                   |             |
-  |                  | list messages/threads ----------------->|             |
-  |                  | normalize metadata <--------------------|             |
-  |                  | create template      |                   |             |
-  |                  | store draft/history ->|                  |             |
-  |<-----------------|                     |                   |             |
-  | personalize AI   |                     |                   |             |
-  |----------------->| bounded facts/snippets ------------------------------>|
-  |                  | subject/body <----------------------------------------|
-  |                  | append signature     |                   |             |
-  |                  | replace draft ------>|                   |             |
-  |<-----------------|                     |                   |             |
-  | edit + save      |                     |                   |             |
-  |----------------->| revalidate recipient|                   |             |
-  |                  | store draft ------->|                   |             |
-  |<-----------------|                     |                   |             |
-  | confirm + send   |                     |                   |             |
-  |----------------->| revalidate all      |                   |             |
-  |                  | conditional lock -->|                   |             |
-  |                  | users/me/send ------------------------->|             |
-  |                  | provider IDs <--------------------------|             |
-  |                  | sent audit + unlock>|                   |             |
-  |<-----------------|                     |                   |             |
+React             FastAPI               DynamoDB           Instantly       Gmail/Claude
+  | config/generate   |                      |                  |                 |
+  |------------------>| load project/user -->|                  |                 |
+  |                   | marketing history -->|                  |                 |
+  |                   | or employee history -------------------------------->|
+  |                   | create sender-aware template          |                 |
+  |                   | store draft -------->|                  |                 |
+  |<------------------|                      |                  |                 |
+  | personalize AI    |                      |                  |                 |
+  |------------------>| bounded facts/snippets -------------------------------->|
+  |                   | subject/body + server signature <-----------------------|
+  |                   | replace draft ------>|                  |                 |
+  |<------------------|                      |                  |                 |
+  | edit + save       |                      |                  |                 |
+  |------------------>| revalidate recipient/sender/reply owner|                 |
+  |                   | store draft -------->|                  |                 |
+  |<------------------|                      |                  |                 |
+  | confirm + send    |                      |                  |                 |
+  |------------------>| revalidate + acquire mode-specific lock|                 |
+  |                   | marketing: test-email ---------------->|                 |
+  |                   | employee: users/me/send -------------------------------->|
+  |                   | sent audit/route + unlock ------------->|                 |
+  |<------------------|                      |                  |                 |
+
+EventBridge       Reply Lambda           DynamoDB           Instantly       Sales owner
+  | every 5 min      |                      |                  |                 |
+  |----------------->| load routes -------->|                  |                 |
+  |                  | list received mail -------------------->|                 |
+  |                  | match/dedupe/suppress|                  |                 |
+  |                  | forward human reply ------------------->|---------------->|
+  |                  | forwarding audit --->|                  |                 |
 ```
 
-The draft payload is never trusted as recipient authority. Save and send reload the current admitted project and compare the normalized `to` address with its published contacts. Subject line breaks are rejected. The send path refuses an existing sent record and acquires an atomic `put_if_absent` record before contacting Gmail. The lock is removed in a `finally` block after success or provider failure.
+The draft payload is never trusted as recipient, sender, or reply-owner authority. Save and send reload the current admitted project, compare the normalized `to` address with its published contacts, force the marketing sender from configuration, and restrict reply owners to the server list. Subject line breaks are rejected. The send path refuses an existing sent record and acquires an atomic `put_if_absent` record before contacting either provider. The lock is removed in a `finally` block after success or provider failure.
 
-Phone is an independent optional contact path. Phone-only projects pass catalog admission and render a `tel:` action, but `/api/outreach/generate` returns `400` unless the current project also has a source-published email. Calls are initiated by the user’s device and are not logged as Gmail outreach.
+Phone is an independent optional contact path. Phone-only projects pass catalog admission and render a `tel:` action, but `/api/outreach/generate` returns `400` unless the current project also has a source-published email. Calls are initiated by the user’s device and are not logged as email outreach.
 
-Generating or saving is not evidence of delivery. Only a successful Gmail API response creates sent status. Stored provider IDs support later reconciliation without retaining a raw RFC 2822 message.
+Generating or saving is not evidence of delivery. Only a successful Instantly or Gmail response creates sent status. Marketing delivery records its route only after provider success. Stored provider IDs support reply deduplication and Gmail reconciliation without retaining raw messages.
 
 ## Persistence model
 
@@ -163,9 +177,12 @@ The DynamoDB table uses `owner` as partition key and `recordKey` as sort key. Pa
 | --- | --- | --- |
 | `google#account` | identity, access/refresh tokens, scopes, expiry | Provider credential; backend-only |
 | `draft#<project>` | bid-desk fields | Internal business data |
-| `outreach#<project>` | draft, contacts, snippets, status, Gmail IDs | Internal communication audit |
+| `outreach#<project>` | draft, contacts, snippets, sender mode, reply owner, status, provider IDs | Internal communication audit |
 | `gmail-send-lock#<project>` | transient send coordination | Operational |
 | `monitor#<uuid>` | proposed source URL/status | Internal workflow |
+| `route#<recipient-hash>` under system owner | latest marketing send, project, sales owner, cooldown timestamp | Internal routing audit |
+| `send-lock#<recipient-hash>` under system owner | transient cross-user marketing coordination | Operational |
+| `reply#<provider-id-hash>` under system owner | bounded reply snippet, disposition, forwarding status | Internal communication audit |
 
 Production uses on-demand capacity, AWS-managed encryption, point-in-time recovery, and a retain removal policy. Local development/tests use a process-local dictionary with equivalent owner/key behavior.
 
@@ -177,9 +194,9 @@ The documents S3 bucket is an encrypted, versioned, retained boundary for future
 
 `apiRequest` is same-origin by default, always includes browser credentials, adds JSON headers when needed, normalizes FastAPI errors, and handles 204 responses. It carries no browser-generated identity.
 
-`AppShell` shows the current email and sign-out. Search pages use URL query parameters as shareable state. `OutreachPage` keeps selected-project draft state isolated, renders provider metadata, restricts recipients to a source-backed select, requires browser confirmation, and disables mutations after sent status.
+`AppShell` shows the current email and sign-out. Search pages use URL query parameters as shareable state. `OutreachPage` keeps selected-project draft state isolated, renders provider metadata, restricts recipients to a source-backed select, defaults to the server-declared marketing identity, permits an explicit employee-Gmail selection, restricts marketing reply owners to the server list, requires browser confirmation, and disables mutations after sent status.
 
-Project cards and Bid Desk derive independent email and phone actions from published participants. The Outreach project picker filters to email-capable projects. Its initial draft is deterministic; the explicit personalization button is the only frontend path that invokes Claude.
+Project cards and Bid Desk derive independent email and phone actions from published participants. The Outreach project picker filters to email-capable projects. Changing sender mode regenerates the draft so its visible signature matches the enforced provider identity. The initial draft is deterministic; the explicit personalization button is the only frontend path that invokes Claude.
 
 The UI gate is a usability boundary; the FastAPI dependency is the authorization boundary.
 
@@ -196,6 +213,8 @@ The UI gate is a usability boundary; the FastAPI dependency is the authorization
 | `api/outreach.py` | authenticated generate/history/save/send orchestration |
 | `services/auth.py` | identity predicate and purpose-bound signed payloads |
 | `services/google.py` | Google HTTP/OAuth/token/Gmail client |
+| `services/marketing_outreach.py` | Instantly delivery/reply client, marketing identity, cooldown, routing, reply normalization |
+| `services/outreach.py` | sender-aware deterministic draft and delivery-field validation |
 | `services/ai_outreach.py` | SAM-style Anthropic prompt, bounded context, response validation, fixed Tudelu signature |
 | `services/runtime_secrets.py` | lazy cached SSM decryption |
 | `services/qualification.py` | global visibility and published contacts |
@@ -206,6 +225,7 @@ The UI gate is a usability boundary; the FastAPI dependency is the authorization
 | `services/state.py` | DynamoDB/memory operations and conditional records |
 | `services/northeast*.py` | source-specific regional and SAM-state fetch/parse/normalize |
 | `services/source_refresh.py` | partition-safe snapshot merge |
+| `jobs/sync_marketing_replies.py` | scheduled reply matching, suppression, forwarding, and audit |
 
 The Google service deliberately uses Python’s standard HTTP library, keeping the Lambda runtime dependency set small. `boto3` is supplied by Lambda and imported lazily so local catalog work does not require AWS initialization.
 
@@ -216,9 +236,13 @@ The Google service deliberately uses Python’s standard HTTP library, keeping t
 - OAuth state/domain failure: callback refuses the login without creating an account/session.
 - Revoked/missing refresh token: Gmail operation returns a reconnect error; no sent record is written.
 - Gmail provider/network failure: `502`; send lock is released; draft remains unsent.
-- Anthropic missing-key/provider/invalid-output failure: `502`; no draft is stored and Gmail is not contacted for sending.
+- Missing/failed Instantly marketing provider: configuration reports unavailable or send returns `502`; the cross-user lock is released and no route/sent record is written.
+- Instantly reply-list failure: scheduled invocation fails for EventBridge retry; no reply dispositions are written.
+- Instantly reply-forward failure: a `forward-failed` audit is retained and retried on a later invocation; it is not marked forwarded.
+- Anthropic missing-key/provider/invalid-output failure: `502`; no replacement draft is stored and neither delivery provider is contacted.
 - Phone-only project passed to email generation: `400` with direction to use the call option.
-- Concurrent send: `409`; second request does not contact Gmail.
+- Concurrent send: `409`; second request does not contact either provider.
+- Marketing recipient inside the 14-day cooldown: `409`; no provider call occurs.
 - Previously sent draft mutation/resend: `409`.
 - Catalog S3 failure: API serves its last valid in-memory or packaged catalog.
 - One connector failure: old source partition remains and warning/status becomes degraded.
@@ -226,11 +250,11 @@ The Google service deliberately uses Python’s standard HTTP library, keeping t
 
 ## Deployment and caching
 
-CDK bundles the Python API and refresh functions in the official Python 3.12 x86-64 build image. The API timeout stays below API Gateway’s response boundary; the national refresh has 1,024 MB of memory and a 15-minute timeout for the bounded 51-partition fan-out.
+CDK bundles the Python API, national refresh, and marketing reply-sync functions in the official Python 3.12 x86-64 build image. The API timeout stays below API Gateway’s response boundary; the national refresh has 1,024 MB of memory and a 15-minute timeout for the bounded 51-partition fan-out; the reply sync has 512 MB and a two-minute timeout. EventBridge runs reply sync every five minutes with two retries.
 
 Frontend hashed assets are immutable for one year. `index.html` is no-store and CloudFront is invalidated on deployment. API behavior disables caching, which is required for cookies, auth status, drafts, and provider operations.
 
-Resources are tagged `Project=BidAtlas`. The stack does not import or mutate the old SAM reference application’s EC2, SQLite, DynamoDB, S3, tokens, or deployment resources.
+Resources are tagged `Project=BidAtlas`. Lambda assets explicitly exclude both reference repositories. The stack does not import or mutate their EC2 hosts, databases, S3 objects, contact exports, send history, CRM state, tokens, or deployment resources.
 
 ## Verification expectations
 
@@ -240,8 +264,8 @@ Every release runs:
 - TypeScript no-emit checking for CDK;
 - Ruff for backend and tests;
 - Vitest/Testing Library;
-- Pytest/FastAPI TestClient, including qualification, exact-domain auth, signed-token tamper/expiry, connector parsing, source merging, published-recipient enforcement, and Gmail send audit behavior;
+- Pytest/FastAPI TestClient, including qualification, exact-domain auth, signed-token tamper/expiry, connector parsing, source merging, published-recipient enforcement, marketing identity/cooldown/reply routing, and employee Gmail send audit behavior;
 - Vite production build;
 - CDK synth before deploy.
 
-Production smoke checks must not send real mail unless a human has selected a controlled project and recipient.
+Production smoke checks may validate the connected Instantly account and invoke reply sync only when no marketing routes exist. They must not send real mail unless a human has selected a controlled project and recipient.

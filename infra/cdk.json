@@ -10,6 +10,7 @@
     "googleClientIdParameterName": "/BidAtlas/google-client-id",
     "googleClientSecretParameterName": "/BidAtlas/google-client-secret",
     "sessionSecretParameterName": "/BidAtlas/session-secret",
-    "anthropicApiKeyParameterName": "/BidAtlas/anthropic-api-key"
+    "anthropicApiKeyParameterName": "/BidAtlas/anthropic-api-key",
+    "instantlyApiTokenParameterName": "/tudelu-marketing/INSTANTLY_API_TOKEN"
   }
 }

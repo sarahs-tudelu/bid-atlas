@@ -6,7 +6,7 @@ import { AsyncState } from "../components/AsyncState";
 import { useApi } from "../hooks/useApi";
 import { useAuth } from "../hooks/useAuth";
 import { emailContacts } from "../lib/contacts";
-import type { OutreachDraft, Project, SearchResponse } from "../types";
+import type { OutreachConfig, OutreachDraft, Project, SearchResponse } from "../types";
 
 interface DraftResponse {
   draft: OutreachDraft;
@@ -28,6 +28,7 @@ export function OutreachPage() {
     limit: 100,
   })}`);
   const history = useApi<HistoryResponse>("/api/outreach/history");
+  const outreachConfig = useApi<OutreachConfig>("/api/outreach/config");
   const refetchHistory = history.refetch;
   const [draftState, setDraft] = useState<OutreachDraft | null>(null);
   const [failure, setFailure] = useState<{ projectId: string; message: string } | null>(null);
@@ -89,31 +90,35 @@ export function OutreachPage() {
 
   const send = async (): Promise<void> => {
     if (!draft || draft.status === "sent") return;
-    if (!window.confirm(`Send this message from ${user?.email} to ${draft.to}?`)) return;
-    setSaveStatus("Sending through Gmail…");
+    if (!window.confirm(`Send this message from ${draft.senderEmail} to ${draft.to}?`)) return;
+    setSaveStatus(draft.senderMode === "marketing" ? "Sending through the marketing mailbox…" : "Sending through Gmail…");
     try {
       const response = await apiRequest<DraftResponse>("/api/outreach/send", {
         method: "POST",
         body: JSON.stringify(draft),
       });
       setDraft(response.draft);
-      setSaveStatus("Sent from your Tudelu Gmail account and logged in outreach history.");
+      setSaveStatus(
+        draft.senderMode === "marketing"
+          ? `Sent from ${response.draft.senderEmail}; responses will be forwarded to ${response.draft.replyOwnerEmail}.`
+          : "Sent from your Tudelu Gmail account and logged in outreach history.",
+      );
       history.refetch();
     } catch (cause) {
-      setSaveStatus(cause instanceof Error ? cause.message : "Gmail could not send this message.");
+      setSaveStatus(cause instanceof Error ? cause.message : "The email provider could not send this message.");
     }
   };
 
   const refreshGmailHistory = async (): Promise<void> => {
     if (!projectId) return;
-    setSaveStatus("Refreshing Gmail history…");
+    setSaveStatus("Refreshing contact history…");
     try {
       const response = await apiRequest<DraftResponse>("/api/outreach/gmail-history", {
         method: "POST",
         body: JSON.stringify({ projectId }),
       });
       setDraft(response.draft);
-      setSaveStatus("Gmail history refreshed.");
+      setSaveStatus("Contact history refreshed.");
     } catch (cause) {
       setSaveStatus(cause instanceof Error ? cause.message : "Gmail history could not be refreshed.");
     }
@@ -130,6 +135,8 @@ export function OutreachPage() {
           regenerate: true,
           personalize: true,
           to: draft?.to ?? "",
+          senderMode: draft?.senderMode ?? "marketing",
+          replyOwnerEmail: draft?.replyOwnerEmail ?? "",
         }),
       });
       setDraft(response.draft);
@@ -141,13 +148,35 @@ export function OutreachPage() {
     }
   };
 
+  const changeSenderMode = async (senderMode: "marketing" | "employee"): Promise<void> => {
+    if (!projectId || draft?.status === "sent" || senderMode === draft?.senderMode) return;
+    setSaveStatus("Updating sender identity…");
+    try {
+      const response = await apiRequest<DraftResponse>("/api/outreach/generate", {
+        method: "POST",
+        body: JSON.stringify({
+          projectId,
+          regenerate: true,
+          senderMode,
+          to: draft?.to ?? "",
+          replyOwnerEmail: draft?.replyOwnerEmail ?? outreachConfig.data?.defaultReplyOwnerEmail ?? "",
+        }),
+      });
+      setDraft(response.draft);
+      setSaveStatus(`Sender changed to ${response.draft.senderEmail}. Review the regenerated draft.`);
+      history.refetch();
+    } catch (cause) {
+      setSaveStatus(cause instanceof Error ? cause.message : "The sender could not be changed.");
+    }
+  };
+
   return (
     <main className="route-page page-width">
       <header className="route-heading outreach-heading">
-        <p className="eyebrow">GMAIL-CONNECTED OUTREACH</p>
-        <h1>Review contact history, then send from your Tudelu mailbox.</h1>
+        <p className="eyebrow">MARKETING + GMAIL OUTREACH</p>
+        <h1>Send from Tudelu marketing, with an employee-mailbox option.</h1>
         <p>
-          Start with a signed Tudelu template, then optionally personalize it with Claude using source evidence and prior contact snippets. Every message requires your review and confirmation.
+          Marketing outreach defaults to Alex at Tudelu and routes responses to the selected sales owner. Employees can switch to their own Gmail account. Every message still requires review and confirmation.
         </p>
       </header>
 
@@ -184,7 +213,8 @@ export function OutreachPage() {
             </p>
             <ul>{draft.canopyFit.reasons.map((reason) => <li key={reason}>{reason}</li>)}</ul>
             {selectedProject ? <a href={selectedProject.sourceUrl} target="_blank" rel="noreferrer">Verify official source ↗</a> : null}
-            <p className="field-hint">Sender: <strong>{user?.email}</strong></p>
+            <p className="field-hint">Sender: <strong>{draft.senderEmail}</strong></p>
+            <p className="field-hint">Reply owner: <strong>{draft.replyOwnerEmail}</strong></p>
           </aside>
 
           <div className="outreach-workspace">
@@ -198,6 +228,41 @@ export function OutreachPage() {
               {draft.generation?.provider === "anthropic" ? (
                 <p className="field-hint">AI-generated with {draft.generation.model}. Review the source facts, recipient, and message before sending.</p>
               ) : <p className="field-hint">Signed Tudelu template. AI personalization is optional.</p>}
+
+              <label>
+                <span>Send from</span>
+                <select
+                  value={draft.senderMode}
+                  disabled={draft.status === "sent"}
+                  onChange={(event) => void changeSenderMode(event.target.value as "marketing" | "employee")}
+                >
+                  <option value="marketing">
+                    Alex Turner · {outreachConfig.data?.marketing.email ?? draft.senderEmail}
+                  </option>
+                  <option value="employee">My Tudelu Gmail · {user?.email}</option>
+                </select>
+              </label>
+              {draft.senderMode === "marketing" ? (
+                <label>
+                  <span>Route responses to</span>
+                  <select
+                    value={draft.replyOwnerEmail}
+                    disabled={draft.status === "sent"}
+                    onChange={(event) => {
+                      const owner = outreachConfig.data?.salesReplyOwners.find((item) => item.email === event.target.value);
+                      setDraft({
+                        ...draft,
+                        replyOwnerEmail: event.target.value,
+                        replyOwnerName: owner?.name ?? event.target.value,
+                      });
+                    }}
+                  >
+                    {(outreachConfig.data?.salesReplyOwners ?? []).map((owner) => (
+                      <option key={owner.email} value={owner.email}>{owner.name} · {owner.email}</option>
+                    ))}
+                  </select>
+                </label>
+              ) : null}
 
               <label>
                 <span>Published contact</span>
@@ -220,7 +285,7 @@ export function OutreachPage() {
               <div className="outreach-actions">
                 <button className="button button-quiet" type="submit" disabled={draft.status === "sent"}>Save draft</button>
                 <button className="button button-primary" type="button" disabled={!draft.to || draft.status === "sent"} onClick={() => void send()}>
-                  Send with Gmail
+                  {draft.senderMode === "marketing" ? "Send from marketing" : "Send with my Gmail"}
                 </button>
                 <span aria-live="polite">{saveStatus}</span>
               </div>
@@ -228,7 +293,7 @@ export function OutreachPage() {
 
             <section className="gmail-history-panel">
               <div className="draft-form-heading">
-                <div><p className="eyebrow">GMAIL CONTEXT</p><h2>Prior contact</h2></div>
+                <div><p className="eyebrow">CONTACT CONTEXT</p><h2>Prior contact</h2></div>
                 <button className="link-button" type="button" onClick={() => void refreshGmailHistory()}>Refresh</button>
               </div>
               {draft.emailHistory?.length ? draft.emailHistory.map((thread) => (
@@ -242,7 +307,7 @@ export function OutreachPage() {
                   ))}
                 </article>
               )) : <p className="evidence-empty">No prior messages with the published project contacts were found.</p>}
-              <small>Only headers and short Gmail snippets are retained with the draft; full inbox bodies are not stored.</small>
+              <small>Only headers and short snippets are retained with the draft; full inbox bodies are not stored.</small>
             </section>
           </div>
         </section>

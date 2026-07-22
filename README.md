@@ -1,6 +1,6 @@
 # BidAtlas
 
-BidAtlas is Tudelu/Canopy’s construction-opportunity workspace. It collects source-backed public projects, ranks architectural-canopy potential, admits only opportunities with a published contact, lets a verified Tudelu user review prior Gmail contact, and sends reviewed outreach from that user’s own Gmail account.
+BidAtlas is Tudelu/Canopy’s construction-opportunity workspace. It collects source-backed public projects, ranks architectural-canopy potential, admits only opportunities with a published contact, and lets a verified Tudelu user review and send outreach. Reviewed emails default to the designated `outreach@tudelugroup.com` marketing mailbox, while an employee can explicitly switch to their own Tudelu Gmail account.
 
 - Production: <https://d9ubnak81sn3g.cloudfront.net>
 - API documentation: <https://d9ubnak81sn3g.cloudfront.net/api/docs>
@@ -31,13 +31,17 @@ Official state pages / public bid boards / ArcGIS / SAM.gov Opportunities API
   -> React shows only admitted projects, companies, and document routes
   -> User signs in with a verified @tudelu.com Google account
   -> HttpOnly signed session identifies the user and their DynamoDB workspace
-  -> Email-capable projects sync Gmail headers/snippets for published email contacts
-  -> FastAPI creates a signed deterministic Tudelu template by default
+  -> Email-capable projects load the relevant marketing-reply or employee-Gmail context
+  -> FastAPI creates a deterministic Tudelu template using the selected sender identity
   -> Optional "Personalize with AI" calls Claude Sonnet 4.6 with bounded facts/context
-  -> FastAPI enforces the signed-in rep's fixed Tudelu name/role/phone/web signature
-  -> User selects a published recipient and reviews subject/body
-  -> Explicit confirmation calls Gmail users.messages.send as the signed-in user
-  -> Draft, metadata-only contact history, Gmail IDs, sender, and sent time are logged
+  -> Marketing drafts use the Alex Turner mailbox identity and Alex Tudelu signoff
+  -> Employee drafts use the signed-in employee and their Tudelu signature
+  -> User selects a published recipient, a sender mode, and (for marketing) a sales reply owner
+  -> User reviews subject/body and explicitly confirms the send
+  -> FastAPI sends from marketing through Instantly by default or through Gmail when selected
+  -> Marketing sends enforce a cross-user recipient lock and 14-day cooldown
+  -> A five-minute reply-sync job suppresses automatic replies and forwards human replies to the selected sales owner
+  -> Draft, minimized contact/reply metadata, provider, sender, reply owner, and sent time are logged
 ```
 
 The application uses the official SAM.gov Opportunities API when its API key is configured. It does not browser-scrape SAM.gov.
@@ -50,15 +54,16 @@ The connector paginates with the API’s documented maximum of 1,000 records per
 | Frontend | React 19, React Router 7 | Authenticated SPA, URL-driven search, bid desk, outreach |
 | Frontend build | Vite 8, TypeScript 5.9 | Strict browser contracts and content-hashed assets |
 | Styling | Plain CSS | Responsive UI and theme support |
-| Backend | FastAPI, Python 3.12 | Auth, catalog/search, workspace, outreach, Gmail boundary |
+| Backend | FastAPI, Python 3.12 | Auth, catalog/search, workspace, outreach, provider boundaries |
 | Lambda adapter | Mangum | API Gateway HTTP API to ASGI |
 | Relevance | Deterministic Python rules | Canopy/proxy terms, NAICS boosts, false-positive penalties |
 | Optional AI drafting | Anthropic Messages API, Claude Sonnet 4.6 | Opt-in SAM-style email personalization from bounded evidence |
 | Catalog | Amazon S3 | Private, encrypted, versioned source snapshot |
 | Workspace | Amazon DynamoDB | Per-Tudelu-user drafts, OAuth account tokens, outreach logs, monitors |
 | Secrets | AWS Systems Manager Parameter Store | Decrypted only at runtime under parameter-specific IAM grants |
-| Email/auth | Google OAuth 2.0 with PKCE; Gmail API | Tudelu identity, message metadata, per-user sending |
-| Scheduling | Amazon EventBridge | Daily national federal ingestion plus regional board ingestion |
+| Email delivery | Instantly API; Gmail API | Default marketing-mailbox delivery, reply routing, optional employee-mailbox delivery |
+| Identity | Google OAuth 2.0 with PKCE | Verified Tudelu login and employee Gmail authorization |
+| Scheduling | Amazon EventBridge | Daily national ingestion and five-minute marketing reply synchronization |
 | Compute | AWS Lambda | FastAPI API and scheduled connector runtime |
 | Web delivery | CloudFront + private S3 | HTTPS SPA, security headers, static caching, API proxy |
 | API ingress | API Gateway HTTP API | Same-origin `/api/*` and `/health` routing |
@@ -89,16 +94,17 @@ Reusable profiles are returned by `GET /api/search-presets`. `direct_national` c
 ### Contact and email rules
 
 - Contacts must be published with the source record; BidAtlas does not manufacture or enrich a recipient.
-- A project may qualify with email, phone, or both. Email-capable projects offer Gmail outreach; phone-capable projects offer a direct `tel:` call action.
+- A project may qualify with email, phone, or both. Email-capable projects offer marketing or employee outreach; phone-capable projects offer a direct `tel:` call action.
 - The server revalidates the recipient against the current project on save and send. A modified browser cannot turn the API into an arbitrary relay.
 - Every send requires a signed-in, verified `@tudelu.com` user and an explicit UI confirmation.
-- Gmail sends as `users/me`; no shared SMTP identity is used.
-- A per-project conditional DynamoDB lock prevents concurrent duplicate sends.
+- Marketing is the default sender mode and uses the connected `outreach@tudelugroup.com` Instantly account with the Alex Turner identity. The employee option uses Gmail `users/me` for the signed-in employee.
+- Marketing replies are assigned to one of the designated Tudelu sales owners and forwarded by the scheduled reply-sync job. Employee-mailbox replies return directly to that employee.
+- Marketing sending has a cross-user per-recipient conditional lock and a 14-day cooldown. Employee sending has a per-user/per-project lock.
 - Sent records cannot be edited, regenerated, or resent.
-- Gmail history stores only From, To, Subject, Date, a short snippet, and Gmail message/thread IDs. Full inbox bodies are not persisted.
-- Only the explicit **Personalize with AI** action calls Anthropic. It sends bounded project facts plus minimized Gmail headers/snippets; Gmail message/thread IDs and full bodies are excluded from the AI prompt.
-- Claude returns subject/body text only. FastAPI appends a deterministic Tudelu signature using the verified Google display name, `Business Development | Tudelu`, `718-782-7882` with the SAM employee extension mapping when known, and `tudelu.com`.
-- Generated text is always editable and must be reviewed. Claude cannot select a sender, recipient, or invoke Gmail.
+- Contact history stores only From, To, Subject, Date, short snippets, status, and necessary provider IDs. Full inbox bodies are not persisted.
+- Only the explicit **Personalize with AI** action calls Anthropic. It sends bounded project facts plus minimized contact-history headers/snippets; provider IDs and full bodies are excluded from the AI prompt.
+- Claude returns subject/body text only. FastAPI appends the approved Alex marketing signoff or the verified employee’s Tudelu signature, including the known SAM employee extension mapping.
+- Generated text is always editable and must be reviewed. Claude cannot select a sender, recipient, reply owner, or invoke either delivery provider.
 - OAuth access/refresh tokens are stored only in the encrypted DynamoDB table and are never returned to React.
 
 ## User workflows
@@ -131,17 +137,19 @@ A bid-ready result additionally requires bidding stage, a non-expired deadline, 
 
 Bid Desk loads project evidence beside the user’s internal draft. `GET/POST /api/bid-drafts` persists it under the signed-in email. Source monitors accept a name and an allowlisted public `https://` URL and store a `pending-review` record; registering a monitor does not automatically fetch or publish the source.
 
-### Gmail outreach
+### Outreach delivery and reply routing
 
 1. `/outreach?project=<id>` selects an admitted project.
-2. `POST /api/outreach/generate` requires a source-published email, queries Gmail for metadata/snippets to/from all published email contacts, and creates a signed deterministic template without contacting Anthropic.
-3. **Personalize with AI** repeats that endpoint with `regenerate: true` and `personalize: true`. Claude Sonnet 4.6 produces an opportunity-specific subject/body using the SAM application’s Tudelu context and style; the existing draft remains available if the provider fails.
-4. FastAPI appends the signed-in rep’s Tudelu signature to both template and AI text. It does not trust the model to supply the phone, extension, role, or website.
-5. The user can switch only among published email contacts, edit subject/body, save, refresh Gmail context, or re-personalize an unsent draft.
-6. **Send with Gmail** shows an explicit sender/recipient confirmation.
-7. `POST /api/outreach/send` revalidates project, recipient, subject, body, prior sent state, and duplicate-send lock before calling Gmail.
-8. The stored sent record includes `sentAt`, `sentBy`, `gmailMessageId`, and `gmailThreadId`.
-9. `/api/outreach/history` restores the authenticated user’s drafts and sent records.
+2. `GET /api/outreach/config` returns the marketing identity, signed-in employee identity, designated sales reply owners, and default sender mode. It never returns provider credentials.
+3. `POST /api/outreach/generate` requires a source-published email and creates a deterministic template without contacting Anthropic. Marketing mode uses the shared reply audit; employee mode queries Gmail metadata/snippets to and from the project’s published contacts.
+4. **Personalize with AI** repeats generation with `regenerate: true` and `personalize: true`. Claude Sonnet 4.6 produces an opportunity-specific subject/body using the SAM application’s Tudelu context and style; the existing draft remains available if the provider fails.
+5. FastAPI appends the approved Alex Tudelu marketing signoff in marketing mode or the verified employee’s fixed Tudelu signature in employee mode.
+6. The user can switch only among source-published recipients, choose marketing or employee delivery, select a designated sales reply owner for marketing, edit subject/body, save, refresh contact context, or re-personalize an unsent draft.
+7. Marketing delivery is preselected. The employee must still review the message and accept the explicit sender/recipient confirmation before any provider call. This release does not create an unattended bulk-send campaign.
+8. `POST /api/outreach/send` revalidates the project, recipient, selected sender, reply owner, subject, body, prior sent state, cooldown, and duplicate-send lock. It calls Instantly for marketing mode or Gmail `users/me/messages/send` for employee mode.
+9. Marketing routes are stored under a system partition so all BidAtlas users share the 14-day per-recipient cooldown. The sent record stores the provider, sender, reply owner, and timestamp; employee sends also retain Gmail message/thread IDs.
+10. EventBridge invokes the marketing reply-sync Lambda every five minutes. It polls only the designated marketing account’s received messages, matches replies to BidAtlas routes, suppresses deterministic/provider-marked automatic replies, forwards human responses to the selected sales owner with the prospect as Reply-To, and deduplicates provider IDs.
+11. `/api/outreach/history` restores the authenticated user’s drafts and sent records. The marketing reply audit exposes only bounded metadata/snippets to the outreach page.
 
 Phone-only opportunities do not enter the email generator. Their card and Bid Desk actions open the published number through a `tel:` link, while the published evidence remains available for manual verification.
 
@@ -184,11 +192,12 @@ The SAM.gov overlay provides a nationwide federal connection, not complete state
 | `GET` | `/api/auth/me` | Session | Current Tudelu user |
 | `POST` | `/api/auth/logout` | Cookie | End browser session |
 | `GET/POST` | `/api/bid-drafts`, `/api/source-monitors` | Session | Per-user workspace |
-| `GET` | `/api/integrations` | App-gated | Google, SAM, Anthropic, and disabled connector status; never secret values |
+| `GET` | `/api/integrations` | App-gated | Google, SAM, Anthropic, Instantly, and disabled connector status; never secret values |
+| `GET` | `/api/outreach/config` | Session | Safe sender identities and designated sales reply-owner choices |
 | `GET` | `/api/outreach/draft`, `/history` | Session | Per-user outreach records |
-| `POST` | `/api/outreach/generate`, `/gmail-history` | Session + Google | Draft and Gmail metadata sync |
+| `POST` | `/api/outreach/generate`, `/gmail-history` | Session | Draft and selected-provider metadata sync; employee mode requires Google |
 | `PUT` | `/api/outreach/draft` | Session | Save reviewed draft |
-| `POST` | `/api/outreach/send` | Session + Google | Send from the logged-in Gmail account |
+| `POST` | `/api/outreach/send` | Session | Confirmed Instantly marketing send or signed-in employee Gmail send |
 
 FastAPI publishes the authoritative request/response schema at `/api/docs`.
 
@@ -199,7 +208,7 @@ frontend/src/
   api/client.ts             credentialed same-origin HTTP client
   hooks/useAuth.tsx         session provider and sign-out
   pages/LoginPage.tsx       Tudelu Google login gate
-  pages/OutreachPage.tsx    Gmail history, draft review, confirmed sending
+  pages/OutreachPage.tsx    sender/reply-owner choice, context, review, confirmed send
   pages/*                   discovery, coverage, companies, documents, bid desk
   components/*              shell, cards, filters, loading/error feedback
   types.ts                  browser API contracts
@@ -211,6 +220,8 @@ backend/app/
   api/workspace.py          authenticated drafts/monitors and integration status
   services/auth.py          domain validation and signed tokens
   services/google.py        OAuth, token refresh, Gmail metadata and send
+  services/marketing_outreach.py  Instantly delivery, cooldown, routing, reply normalization
+  services/outreach.py      deterministic sender-aware draft generation
   services/ai_outreach.py   Anthropic prompt, response validation, fixed signature
   services/qualification.py global contact + Canopy admission rule
   services/canopy.py        deterministic scoring and profiles
@@ -221,6 +232,7 @@ backend/app/
   services/source_refresh.py partition-safe merge and coverage reconciliation
   services/state.py         DynamoDB/in-memory persistence and send locks
   jobs/refresh_national.py  scheduled Lambda entry point
+  jobs/sync_marketing_replies.py  scheduled marketing reply forwarding
 
 data-export/                deploy seed, registry, coverage and provenance
 infra/                      AWS CDK stack and context
@@ -228,9 +240,10 @@ scripts/                    local national refresh tooling
 docs/                       domain plans and operating documentation
 legacy/cloudflare/          archived prior runtime, excluded from deployment
 sam_dot_gov-main/           ignored reference application, excluded from Git/AWS assets
+tudelu-cold-outreach-main/  ignored reference application, excluded from Git/AWS assets
 ```
 
-The SAM reference application’s SQLite/DynamoDB content and historical OAuth tokens are not imported into BidAtlas. Only reusable behavior was reimplemented. Values from its ignored `.env` are promoted to new BidAtlas SSM SecureStrings during deployment without exposing values in Git or CloudFormation.
+The SAM and cold-outreach reference applications’ databases, lead/contact exports, send history, CRM state, and OAuth tokens are not imported into BidAtlas. Only reusable behavior was reimplemented. Required values from ignored local configuration are promoted to BidAtlas SSM SecureStrings without exposing them in Git or CloudFormation. See [`docs/COLD_OUTREACH_INTEGRATION.md`](docs/COLD_OUTREACH_INTEGRATION.md).
 
 ## Persistence and AWS architecture
 
@@ -242,14 +255,22 @@ CloudFront
 FastAPI Lambda
   +-- read catalog S3
   +-- read/write DynamoDB workspace
-  +-- decrypt Google client ID/secret, session secret, and Anthropic API key
+  +-- decrypt Google client ID/secret, session secret, Anthropic key, and Instantly token
   +-- call Anthropic Messages API for reviewed email drafts
+  +-- send reviewed marketing email through the designated Instantly account
+  +-- optionally send from the signed-in employee through Gmail
 
 EventBridge (daily 10:15 UTC)
   -> National refresh Lambda
        +-- decrypt only SAM API key parameter
        +-- isolate federal results by all 50 states and D.C.
        +-- read/write versioned catalog S3
+
+EventBridge (every five minutes)
+  -> Marketing reply-sync Lambda
+       +-- decrypt only the Instantly token parameter
+       +-- read system marketing routes/reply audits in DynamoDB
+       +-- forward human replies to the route's designated sales owner
 ```
 
 DynamoDB keys:
@@ -260,6 +281,9 @@ owner=<verified Tudelu email>  recordKey=draft#<project-id>             bid draf
 owner=<verified Tudelu email>  recordKey=outreach#<project-id>          draft/history/sent audit
 owner=<verified Tudelu email>  recordKey=gmail-send-lock#<project-id>   conditional transient lock
 owner=<verified Tudelu email>  recordKey=monitor#<uuid>                 source review item
+owner=system#marketing-outreach recordKey=route#<recipient-hash>        latest route and cooldown
+owner=system#marketing-outreach recordKey=send-lock#<recipient-hash>    cross-user transient lock
+owner=system#marketing-outreach recordKey=reply#<provider-id-hash>      forwarding/suppression audit
 ```
 
 The table uses AWS-managed encryption, on-demand billing, point-in-time recovery, and `RETAIN`. Catalog and document buckets are private, encrypted, TLS-only, versioned, and retained. The frontend bucket is private and disposable because CDK can rebuild it.
@@ -275,8 +299,9 @@ Production parameter names are nonsecret CDK context in `infra/cdk.json`:
 - `/BidAtlas/google-client-secret`
 - `/BidAtlas/session-secret`
 - `/BidAtlas/anthropic-api-key`
+- `/tudelu-marketing/INSTANTLY_API_TOKEN`
 
-Values must be `SecureString`s. CDK passes parameter names—not values—to Lambda, and IAM grants `ssm:GetParameter` only on the required ARNs. Google OAuth and Anthropic values belong only to the API Lambda; the SAM key belongs only to the refresh Lambda. Production pins `BIDATLAS_ANTHROPIC_MODEL=claude-sonnet-4-6` to match the SAM reference implementation.
+Values must be `SecureString`s. CDK passes parameter names—not values—to Lambda, and IAM grants `ssm:GetParameter` only on the required ARNs. Google OAuth and Anthropic values belong only to the API Lambda; the SAM key belongs only to the refresh Lambda; the Instantly token belongs to the API and marketing reply-sync Lambdas. Production pins `BIDATLAS_ANTHROPIC_MODEL=claude-sonnet-4-6` to match the SAM reference implementation and `BIDATLAS_MARKETING_SENDER=outreach@tudelugroup.com` to the connected marketing account.
 
 ## Local development
 
@@ -290,6 +315,7 @@ npm run dev
 
 Vite runs on `http://localhost:5173` and proxies `/api` and `/health` to FastAPI on `http://localhost:8000`. Configure a Google OAuth web client redirect for `http://localhost:8000/api/auth/google/callback` and use direct `BIDATLAS_GOOGLE_*` environment values locally.
 Set `BIDATLAS_ANTHROPIC_API_KEY` (or `ANTHROPIC_API_KEY`) for local AI email generation; never commit it.
+Set `BIDATLAS_INSTANTLY_API_TOKEN` and optionally `BIDATLAS_MARKETING_SENDER` for local marketing-provider checks. Never perform a provider send as an automated smoke test.
 
 Optional local source refresh:
 
@@ -315,8 +341,9 @@ Deployment builds React, bundles FastAPI for Python 3.12 x86-64, updates CloudFo
 1. verify `/health`, `/api/meta`, and `/api/auth/google/status`;
 2. invoke the national refresh Lambda once and confirm `samConfigured: true`, `scope: 50-states-and-dc`, and 51 expected federal partitions;
 3. verify every returned `/api/search` project has a published email or phone and score of at least 8;
-4. complete a Tudelu Google login and confirm Gmail history loads;
-5. confirm the default template does not require AI, then personalize an unsent draft and verify model metadata plus the fixed Tudelu signature;
-6. use a controlled recipient/project before performing any live send test.
+4. verify the marketing reply-sync schedule is enabled and a no-route invocation exits without polling or forwarding;
+5. complete a Tudelu Google login and confirm marketing is preselected, a designated sales reply owner is required, and employee Gmail remains selectable;
+6. confirm the default template does not require AI, then personalize an unsent marketing and employee draft and verify the corresponding fixed Tudelu signatures;
+7. use a controlled recipient/project before performing any live provider send test.
 
 Do not send a production email merely as an infrastructure smoke test.
