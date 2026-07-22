@@ -27,6 +27,7 @@ export function OutreachPage() {
     limit: 100,
   })}`);
   const history = useApi<HistoryResponse>("/api/outreach/history");
+  const refetchHistory = history.refetch;
   const [draftState, setDraft] = useState<OutreachDraft | null>(null);
   const [failure, setFailure] = useState<{ projectId: string; message: string } | null>(null);
   const [saveStatus, setSaveStatus] = useState("");
@@ -46,6 +47,7 @@ export function OutreachPage() {
         if (!active) return;
         setDraft(response.draft);
         setFailure(null);
+        refetchHistory();
       })
       .catch((cause: unknown) => {
         if (!active) return;
@@ -57,7 +59,7 @@ export function OutreachPage() {
     return () => {
       active = false;
     };
-  }, [projectId]);
+  }, [projectId, refetchHistory]);
 
   const selectedProject = useMemo(
     () => candidates.data?.projects.find((project) => project.id === projectId),
