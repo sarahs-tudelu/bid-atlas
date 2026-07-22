@@ -10,6 +10,7 @@ import {
 import { allStateOptions, normalizeStateCode } from "./national-coverage";
 import { classifyProjectFreshness, freshnessMatchesFilter } from "./outreach-intelligence";
 import { isArchivedProjectStage } from "./project-lifecycle";
+import { projectMatchesLeadFilter } from "./project-leads";
 import { inferredProjectSectorTags } from "./project-sector";
 
 function normalize(value: string): string {
@@ -169,6 +170,7 @@ export function projectMatchesSearch(
   if (options.readiness === "bid-ready" && !isBidReadyProject(project, now)) {
     return false;
   }
+  if (!projectMatchesLeadFilter(project, options.leadFilter, now)) return false;
   if (!options.includeArchived && isArchivedProjectStage(project.stage)) return false;
   if (options.stage && options.stage !== "all" && project.stage !== options.stage) return false;
   if (

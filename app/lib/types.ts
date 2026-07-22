@@ -192,6 +192,15 @@ export type BidDueFilter = "all" | "today" | "7-days" | "14-days";
 
 export type ProjectReadinessFilter = "bid-ready" | "all";
 
+export type ProjectLeadFilter =
+  | "partial"
+  | "all"
+  | "missing-owner"
+  | "missing-contractor"
+  | "missing-documents"
+  | "missing-deadline"
+  | "early-stage";
+
 export interface ProjectSearchOptions {
   keywords: string[];
   location?: string;
@@ -202,6 +211,8 @@ export interface ProjectSearchOptions {
   due?: BidDueFilter;
   /** The primary queue admits only official, current bids with usable documents. */
   readiness?: ProjectReadinessFilter;
+  /** Optional prospecting lens used by the separate Project Leads workspace. */
+  leadFilter?: ProjectLeadFilter;
   /** Completed and cancelled records are archived from actionable search by default. */
   includeArchived?: boolean;
 }
@@ -213,6 +224,7 @@ export interface SearchResultMeta {
   freshness?: FreshnessFilter;
   due?: BidDueFilter;
   readiness?: ProjectReadinessFilter;
+  leadFilter?: ProjectLeadFilter;
   includeArchived?: boolean;
   searchedProjects: number;
   matchedProjects: number;

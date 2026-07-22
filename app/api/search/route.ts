@@ -8,6 +8,7 @@ import { parseKeywordInput } from "../../lib/search";
 import type {
   BidDueFilter,
   FreshnessFilter,
+  ProjectLeadFilter,
   ProjectSearchOptions,
   ProjectReadinessFilter,
   ProjectStage,
@@ -19,6 +20,15 @@ export const dynamic = "force-dynamic";
 const VALID_MATCHES = new Set<SearchMatch>(["all", "any", "phrase"]);
 const VALID_DUE_FILTERS = new Set<BidDueFilter>(["all", "today", "7-days", "14-days"]);
 const VALID_READINESS = new Set<ProjectReadinessFilter>(["bid-ready", "all"]);
+const VALID_LEAD_FILTERS = new Set<ProjectLeadFilter>([
+  "partial",
+  "all",
+  "missing-owner",
+  "missing-contractor",
+  "missing-documents",
+  "missing-deadline",
+  "early-stage",
+]);
 const VALID_PAGE_SIZES = new Set([10, 25, 50]);
 const VALID_STAGES = new Set<ProjectStage>([
   "planning",
@@ -73,6 +83,11 @@ export async function GET(request: Request) {
   const readiness =
     requestedReadiness && VALID_READINESS.has(requestedReadiness)
       ? requestedReadiness : "all";
+  const requestedLeadFilter = url.searchParams.get("leadFilter") as ProjectLeadFilter | null;
+  const leadFilter =
+    requestedLeadFilter && VALID_LEAD_FILTERS.has(requestedLeadFilter)
+      ? requestedLeadFilter
+      : undefined;
   const location = (url.searchParams.get("location") ?? "").trim().slice(0, 160);
   const rawState = (url.searchParams.get("state") ?? "all").trim();
   const state = rawState.toLowerCase() === "all" ? "all" : normalizeStateCode(rawState) ?? "all";
@@ -97,6 +112,7 @@ export async function GET(request: Request) {
     due,
     includeArchived,
     readiness,
+    ...(leadFilter ? { leadFilter } : {}),
   };
   const result = await queryConnectedProjects(feed, options, page, pageSize);
 

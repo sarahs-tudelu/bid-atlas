@@ -274,6 +274,83 @@ function officialSourceDocumentLinkSql(alias: string): string {
 const SEARCHABLE_OFFICIAL_DOCUMENT_LINK_SQL =
   officialSourceDocumentLinkSql("d");
 
+function bidReadyProjectFilterSql(referenceTime: Date): {
+  sql: string;
+  bindings: SqlBinding[];
+} {
+  const todayWindow = bidDueWindow(
+    "today",
+    referenceTime,
+    DEFAULT_BID_DATE_TIME_ZONE,
+  );
+  if (!todayWindow) throw new Error("Unable to resolve bid-ready date window.");
+  const readinessSourceZones = sourceBidDateTimeZones();
+  const readinessDateOnlyClauses = readinessSourceZones.map(
+    () => `(
+      EXISTS (
+        SELECT 1 FROM project_sources bid_ready_deadline_ps
+         WHERE bid_ready_deadline_ps.project_id = p.id
+           AND bid_ready_deadline_ps.source_id = ?
+      )
+      AND date(p.bid_date) >= date(?)
+    )`,
+  );
+  const readinessSourceExclusion = readinessSourceZones.length > 0
+    ? `NOT EXISTS (
+        SELECT 1 FROM project_sources bid_ready_deadline_default_ps
+         WHERE bid_ready_deadline_default_ps.project_id = p.id
+           AND bid_ready_deadline_default_ps.source_id IN (${readinessSourceZones.map(() => "?").join(", ")})
+      )`
+    : "1 = 1";
+  const sql =
+    "(" +
+      "p.stage = 'bidding' " +
+      "AND trim(coalesce(p.title, '')) <> '' " +
+      "AND trim(coalesce(p.summary, '')) <> '' " +
+      "AND trim(coalesce(p.agency, '')) <> '' " +
+      "AND (trim(coalesce(p.address, '')) <> '' " +
+        "OR trim(coalesce(p.city, '')) <> '' " +
+        "OR trim(coalesce(p.county, '')) <> '' " +
+        "OR trim(coalesce(p.state, '')) <> '') " +
+      "AND datetime(p.bid_date) IS NOT NULL " +
+      "AND (" +
+        "(time(p.bid_date) = '00:00:00' AND (" +
+          (readinessDateOnlyClauses.length > 0
+            ? readinessDateOnlyClauses.join(" OR ") + " OR "
+            : "") +
+          "(" + readinessSourceExclusion + " AND date(p.bid_date) >= date(?))" +
+        ")) " +
+        "OR " +
+        "(time(p.bid_date) <> '00:00:00' AND datetime(p.bid_date) >= datetime(?))" +
+      ") " +
+      "AND EXISTS (" +
+        "SELECT 1 FROM project_sources bid_ready_ps " +
+        "JOIN sources bid_ready_s ON bid_ready_s.id = bid_ready_ps.source_id " +
+        "WHERE bid_ready_ps.project_id = p.id " +
+          "AND lower(coalesce(bid_ready_ps.confidence, '')) = 'official' " +
+          "AND lower(bid_ready_ps.source_url) LIKE 'https://%' " +
+          "AND bid_ready_s.source_class = 'procurement'" +
+      ") " +
+      "AND EXISTS (" +
+        "SELECT 1 FROM documents bid_ready_d " +
+        "WHERE bid_ready_d.project_id = p.id " +
+          "AND lower(replace(replace(bid_ready_d.document_type, '_', '-'), ' ', '-')) " +
+            "IN (" + BID_READY_DOCUMENT_TYPES_SQL + ") " +
+          "AND (" + officialSourceDocumentLinkSql("bid_ready_d") + ")" +
+      ")" +
+    ")";
+  const bindings: SqlBinding[] = [];
+  for (const [sourceId, timeZone] of readinessSourceZones) {
+    bindings.push(sourceId, calendarDateInTimeZone(referenceTime, timeZone));
+  }
+  bindings.push(...readinessSourceZones.map(([sourceId]) => sourceId));
+  bindings.push(
+    calendarDateInTimeZone(referenceTime, DEFAULT_BID_DATE_TIME_ZONE),
+    referenceTime.toISOString(),
+  );
+  return { sql, bindings };
+}
+
 export function projectFilterSql(
   options: ProjectSearchOptions,
   referenceTime = new Date(),
@@ -283,77 +360,33 @@ export function projectFilterSql(
 } {
   const clauses: string[] = [];
   const bindings: SqlBinding[] = [];
-  if (options.readiness === "bid-ready") {
-    const todayWindow = bidDueWindow(
-      "today",
-      referenceTime,
-      DEFAULT_BID_DATE_TIME_ZONE,
-    );
-    if (!todayWindow) throw new Error("Unable to resolve bid-ready date window.");
-    const readinessSourceZones = sourceBidDateTimeZones();
-    const readinessDateOnlyClauses = readinessSourceZones.map(
-      () => `(
-        EXISTS (
-          SELECT 1 FROM project_sources bid_ready_deadline_ps
-           WHERE bid_ready_deadline_ps.project_id = p.id
-             AND bid_ready_deadline_ps.source_id = ?
-        )
-        AND date(p.bid_date) >= date(?)
-      )`,
-    );
-    const readinessSourceExclusion = readinessSourceZones.length > 0
-      ? `NOT EXISTS (
-          SELECT 1 FROM project_sources bid_ready_deadline_default_ps
-           WHERE bid_ready_deadline_default_ps.project_id = p.id
-             AND bid_ready_deadline_default_ps.source_id IN (${readinessSourceZones.map(() => "?").join(", ")})
-        )`
-      : "1 = 1";
-    clauses.push(
-      "(" +
-        "p.stage = 'bidding' " +
-        "AND trim(coalesce(p.title, '')) <> '' " +
-        "AND trim(coalesce(p.summary, '')) <> '' " +
-        "AND trim(coalesce(p.agency, '')) <> '' " +
-        "AND (trim(coalesce(p.address, '')) <> '' " +
-          "OR trim(coalesce(p.city, '')) <> '' " +
-          "OR trim(coalesce(p.county, '')) <> '' " +
-          "OR trim(coalesce(p.state, '')) <> '') " +
-        "AND datetime(p.bid_date) IS NOT NULL " +
-        "AND (" +
-          "(time(p.bid_date) = '00:00:00' AND (" +
-            (readinessDateOnlyClauses.length > 0
-              ? readinessDateOnlyClauses.join(" OR ") + " OR "
-              : "") +
-            "(" + readinessSourceExclusion + " AND date(p.bid_date) >= date(?))" +
-          ")) " +
-          "OR " +
-          "(time(p.bid_date) <> '00:00:00' AND datetime(p.bid_date) >= datetime(?))" +
-        ") " +
-        "AND EXISTS (" +
-          "SELECT 1 FROM project_sources bid_ready_ps " +
-          "JOIN sources bid_ready_s ON bid_ready_s.id = bid_ready_ps.source_id " +
-          "WHERE bid_ready_ps.project_id = p.id " +
-            "AND lower(coalesce(bid_ready_ps.confidence, '')) = 'official' " +
-            "AND lower(bid_ready_ps.source_url) LIKE 'https://%' " +
-            "AND bid_ready_s.source_class = 'procurement'" +
-        ") " +
-        "AND EXISTS (" +
-          "SELECT 1 FROM documents bid_ready_d " +
-          "WHERE bid_ready_d.project_id = p.id " +
-            "AND lower(replace(replace(bid_ready_d.document_type, '_', '-'), ' ', '-')) " +
-              "IN (" + BID_READY_DOCUMENT_TYPES_SQL + ") " +
-            "AND (" + officialSourceDocumentLinkSql("bid_ready_d") + ")" +
-        ")" +
-      ")",
-    );
-    for (const [sourceId, timeZone] of readinessSourceZones) {
-      bindings.push(sourceId, calendarDateInTimeZone(referenceTime, timeZone));
-    }
-    bindings.push(...readinessSourceZones.map(([sourceId]) => sourceId));
-    bindings.push(
-      calendarDateInTimeZone(referenceTime, DEFAULT_BID_DATE_TIME_ZONE),
-      referenceTime.toISOString(),
-    );
+  if (options.readiness === "bid-ready" || options.leadFilter === "partial") {
+    const bidReady = bidReadyProjectFilterSql(referenceTime);
+    clauses.push(options.leadFilter === "partial" ? `NOT (${bidReady.sql})` : bidReady.sql);
+    bindings.push(...bidReady.bindings);
+  }
+  if (options.leadFilter === "missing-owner") {
+    clauses.push(`NOT EXISTS (
+      SELECT 1 FROM project_participants lead_owner
+       WHERE lead_owner.project_id=p.id AND lead_owner.role='owner'
+    )`);
+  } else if (options.leadFilter === "missing-contractor") {
+    clauses.push(`NOT EXISTS (
+      SELECT 1 FROM project_participants lead_contractor
+       WHERE lead_contractor.project_id=p.id AND lead_contractor.role='contractor'
+    )`);
+  } else if (options.leadFilter === "missing-documents") {
+    clauses.push(`NOT EXISTS (
+      SELECT 1 FROM documents lead_document
+       WHERE lead_document.project_id=p.id
+         AND lower(replace(replace(lead_document.document_type, '_', '-'), ' ', '-'))
+           IN (${BID_READY_DOCUMENT_TYPES_SQL})
+         AND (${officialSourceDocumentLinkSql("lead_document")})
+    )`);
+  } else if (options.leadFilter === "missing-deadline") {
+    clauses.push("(datetime(p.bid_date) IS NULL OR datetime(p.bid_date) <= datetime('1970-01-02T00:00:00.000Z'))");
+  } else if (options.leadFilter === "early-stage") {
+    clauses.push("p.stage IN ('planning', 'design', 'permitting')");
   }
   if (!options.includeArchived) {
     // Archive only canonical terminal lifecycle stages. Bid dates, bid opening,

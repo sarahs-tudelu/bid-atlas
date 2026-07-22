@@ -57,6 +57,7 @@ export default async function CompaniesPage({ searchParams }: CompaniesPageProps
         </Link>
         <nav aria-label="Primary navigation">
           <Link href="/projects">Projects</Link>
+          <Link href="/leads">Leads</Link>
           <span aria-current="page">Companies</span>
           <Link href="/bid-desk">Bid Desk</Link>
           <Link href="/coverage">Coverage</Link>

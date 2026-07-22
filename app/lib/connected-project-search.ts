@@ -284,6 +284,7 @@ export async function queryConnectedProjects(
       freshness: options.freshness,
       due: options.due,
       readiness: options.readiness,
+      leadFilter: options.leadFilter,
       includeArchived: Boolean(options.includeArchived),
       searchedProjects,
       matchedProjects,
