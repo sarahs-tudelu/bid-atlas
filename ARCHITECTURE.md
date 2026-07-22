@@ -2,73 +2,118 @@
 
 ## Design goals
 
-1. Keep the browser application framework-neutral and static.
-2. Keep HTTP concerns in thin FastAPI routers.
-3. Keep catalog filtering and workspace persistence in testable services.
-4. Keep the AWS footprint isolated, low-cost, encrypted, and reproducible.
-5. Preserve the legacy connector implementation without letting it obscure the active runtime.
+1. Keep the browser application static, typed, accessible, and same-origin with its API.
+2. Keep HTTP concerns in thin FastAPI routers and domain behavior in testable services.
+3. Keep project search read-only and snapshot-backed so upstream portal latency never affects a user request.
+4. Preserve source evidence, distinguish partial coverage from completeness, and retain the last good partition on connector failure.
+5. Keep mutable workspace data low-risk until real authentication and authorization are added.
+6. Keep the AWS footprint isolated, encrypted, low-cost, and reproducible with CDK.
 
 ## Runtime request flow
 
 ```text
-                     ┌──────────────────────────┐
-                     │ CloudFront distribution  │
-                     └────────────┬─────────────┘
-                                  │
-                 ┌────────────────┴────────────────┐
-                 │                                 │
-        frontend route or asset              /api/* or /health
-                 │                                 │
-                 ▼                                 ▼
-       private S3 frontend bucket        API Gateway HTTP API
-                                                   │
-                                                   ▼
-                                          FastAPI Lambda
-                                          ├─ ProjectCatalog
-                                          ├─ JurisdictionCatalog
-                                          └─ WorkspaceStore
-                                                   │
-                                    ┌──────────────┴──────────────┐
-                                    ▼                             ▼
-                              DynamoDB state               private S3 documents
+Browser
+  |
+  v
+CloudFront
+  +-- frontend route/static asset --> private frontend S3 bucket
+  |                                  +-- no-cache index.html
+  |                                  +-- immutable hashed assets
+  |
+  +-- /api/* or /health --> API Gateway HTTP API --> FastAPI Lambda
+                                                   +-- catalog router
+                                                   +-- outreach router
+                                                   +-- workspace router
+                                                         |
+                               +-------------------------+--------------------+
+                               v                                              v
+                    private versioned catalog S3                    DynamoDB workspace table
+                    (read-only to the API)                          (drafts, outreach, monitors)
 ```
+
+The API begins with the packaged `data-export` snapshot. `ProjectCatalogProvider` checks the private S3 object version at a bounded five-minute cadence and swaps in a newly parsed immutable catalog only when the object changes. Searches never call a procurement portal.
+
+## Scheduled ingestion flow
+
+```text
+EventBridge daily rule
+  -> Northeast refresh Lambda
+       -> fixed source adapters run independently
+       -> source response host/size/page guards
+       -> source-specific normalization
+       -> deterministic canopy qualification where the source is broad
+       -> optional SAM.gov state/query fan-out using an SSM SecureString
+       -> replace successful partitions only
+       -> retain failed partitions and mark their source degraded
+       -> recompute inventory and coverage
+       -> write a new version of current-projects.json to catalog S3
+```
+
+The active scheduled adapters cover:
+
+- NJ DPMC and NJDOT public construction pages;
+- MaineDOT and NYSDOT current construction pages;
+- Connecticut CTsource and Rhode Island RIDOT public WebProcure boards;
+- Massachusetts DCR and Pennsylvania DGS current construction listings;
+- NHDOT and VTrans official ArcGIS project services;
+- optional SAM.gov active federal notices by Northeast place of performance.
+
+Each source declares its state and coverage class. A live source can be partial even when it currently yields zero qualified records. No adapter marks a state complete.
 
 ## Frontend boundaries
 
-`frontend/src/App.tsx` owns the route table. Pages compose reusable components and call `apiRequest` or `useApi`; they do not know where FastAPI runs. Local Vite proxying and CloudFront path routing keep the browser contract same-origin in every environment.
+`frontend/src/App.tsx` owns the route table. Route pages compose shared components and call `apiRequest` or `useApi`; they do not know where FastAPI runs. Local Vite proxying and CloudFront path routing keep the contract same-origin.
 
-The project and coverage interfaces live in `frontend/src/types.ts`. Presentational formatting stays close to the component using it. There is no server-rendering lifecycle or framework-specific link component.
+`ProjectResultsPage` treats URL query parameters as search state. Search profiles come from `/api/search-presets`, and cards display deterministic canopy-fit evidence returned with each project. `OutreachPage` owns project selection, editable message state, email-client handoff, and draft/sent history.
+
+Browser contracts live in `frontend/src/types.ts`. Shared formatting, query serialization, loading/error states, responsive navigation, theme state, and feedback components remain outside route pages.
 
 ## Backend boundaries
 
-`backend/app/main.py` creates the application, middleware, routers, health endpoint, and Lambda adapter.
-
-`backend/app/api/catalog.py` exposes read-only public catalog endpoints. `backend/app/api/workspace.py` exposes small mutable workspace endpoints. Both delegate domain work to services.
-
-`ProjectCatalog` indexes one immutable export and retains the existing filtering and pagination conventions. `ProjectCatalogProvider` starts with the packaged export, checks the private S3 object version at a bounded cadence, and swaps in a newly validated immutable catalog when it changes. Searches never wait for upstream procurement portals. `WorkspaceStore` uses DynamoDB in AWS and a thread-safe in-memory implementation for local development and tests.
+- `backend/app/main.py` creates middleware, routers, health, OpenAPI, and the Mangum Lambda adapter.
+- `api/catalog.py` validates read-only catalog/search input.
+- `api/outreach.py` validates draft generation, editing, and explicit sent markers.
+- `api/workspace.py` handles bid drafts, source monitors, and integration status.
+- `services/catalog.py` loads, filters, scores, sorts, and pages one immutable snapshot.
+- `services/canopy.py` owns deterministic scoring patterns and reusable search profiles.
+- `services/outreach.py` selects published contacts and creates the default message without a network or LLM dependency.
+- `services/source_refresh.py` owns partition replacement, degraded-source retention, and aggregate reconciliation.
+- `services/northeast*.py` own source-specific guarded fetching and normalization.
+- `services/state.py` owns DynamoDB/in-memory workspace persistence.
 
 ## Persistence
 
-The checked-in source snapshot is the deployment seed and failure fallback. The private versioned catalog bucket holds the current runtime snapshot. A scheduled, allowlisted New Jersey job is its only writer today; it refreshes official DPMC and NJDOT records and preserves the previous partition when a source fails. Workspace drafts and registered source monitors are mutable user data stored in a single-table DynamoDB layout:
+The checked-in snapshot is both deployment seed and failure fallback. The private versioned catalog bucket is the current runtime source. FastAPI has read-only catalog access; only the refresh Lambda writes the current catalog.
+
+DynamoDB uses this device-workspace layout:
 
 ```text
-owner                  recordKey                 payload
-user@example.com       draft#<project-id>        JSON draft
-user@example.com       monitor#<uuid>            JSON monitor
+owner                              recordKey                 payload
+<device-id>@device.bidatlas        draft#<project-id>        JSON bid draft
+<device-id>@device.bidatlas        outreach#<project-id>     JSON draft/sent outreach record
+<device-id>@device.bidatlas        monitor#<uuid>            JSON source monitor
 ```
 
-The deployed frontend creates a random device workspace identifier and supplies it through `X-BidAtlas-User`. It prevents accidental cross-device mixing but is not account authentication, so drafts must not contain confidential pricing or personal data until an identity provider is added.
+The browser supplies a random local-storage identifier through `X-BidAtlas-User`. This prevents accidental device-workspace mixing but is not authentication. Workspace records must not contain confidential bids, credentials, or sensitive personal data.
 
-The documents bucket is provisioned for protected document ingestion. The current React application links official document routes and does not yet upload files into that bucket.
+The documents bucket is provisioned for future protected ingestion. The active UI links official source documents and does not upload or proxy document bytes.
+
+## Outreach security boundary
+
+Draft generation uses only the project record and source-published contacts. It is deterministic, editable, and persisted per device workspace. **Open in email client** uses `mailto:` after saving; the backend does not send email. **Mark sent** is a separate explicit action and is not inferred from opening the client.
+
+Server-side Gmail, SMTP, or SES delivery must not be added until BidAtlas has authenticated users, per-user provider authorization, abuse/rate controls, audit logs, revocation, and an endpoint-specific threat review. The current public device header cannot authorize a mail sender.
 
 ## Deployment
 
-CDK bundles Python dependencies in the official Python 3.12 Lambda build image. The Lambda runtime is x86-64 to match compiled wheels. Frontend assets are content-hashed by Vite, uploaded by CDK, and invalidated through CloudFront before deployment completion.
+CDK bundles Python dependencies in the official Python 3.12 Lambda build image. Lambda uses x86-64 to match compiled wheels. Vite content-hashes frontend assets; CDK uploads them to private S3 and waits for CloudFront invalidation.
 
-All resources are created by `BidAtlasStack`; no Canopy or Tudelu stack resources are imported or modified.
+The regional refresh Lambda has catalog read/write access. When `samApiKeyParameterName` is supplied as CDK context, it receives `ssm:GetParameter` only for that parameter ARN and reads the SecureString at runtime. The key is never placed in Lambda environment variables or CloudFormation.
 
-The New Jersey refresh Lambda runs daily from EventBridge, fetches only the two configured official HTTPS `nj.gov` pages, bounds response size and redirects, normalizes source records, and updates the catalog object. FastAPI has read-only catalog access; the refresh Lambda has catalog read/write access. API state filters operate entirely on the loaded catalog, so a New Jersey query does not invoke unrelated national sources.
+All resources belong to `BidAtlasStack`; no Canopy or Tudelu stack resource is imported or modified.
 
-## Legacy boundary
+## Legacy and reference boundaries
 
-`legacy/cloudflare` contains the former Next/Vinext server components, TypeScript API routes, D1 schema/migrations, R2 document code, connectors, ingestion Worker, scripts, and tests. It is preserved as migration source material and is excluded from active package scripts and AWS assets.
+`legacy/cloudflare` contains the former Next/Vinext routes, D1/R2 code, connector runtime, ingestion Worker, scripts, and tests. It is excluded from active package scripts and AWS assets.
+
+The local `sam_dot_gov-main` folder was used only as a feature-design reference for scoring, presets, contacts, editable drafts, and sent history. It is ignored by Git and excluded from every runtime artifact. Reusable behavior was reimplemented within the active React/FastAPI architecture and its current security boundary.

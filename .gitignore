@@ -51,3 +51,4 @@ next-env.d.ts
 /.wrangler/
 /outputs/
 /work/
+/sam_dot_gov-main/

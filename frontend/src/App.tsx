@@ -9,6 +9,7 @@ import { HomePage } from "./pages/HomePage";
 import { IntegrationsPage } from "./pages/IntegrationsPage";
 import { LeadsPage } from "./pages/LeadsPage";
 import { NotFoundPage } from "./pages/NotFoundPage";
+import { OutreachPage } from "./pages/OutreachPage";
 import { ProjectsPage } from "./pages/ProjectsPage";
 import { SourceMonitorPage } from "./pages/SourceMonitorPage";
 
@@ -22,6 +23,7 @@ export function App() {
         <Route path="companies" element={<CompaniesPage />} />
         <Route path="documents" element={<DocumentsPage />} />
         <Route path="bid-desk" element={<BidDeskPage />} />
+        <Route path="outreach" element={<OutreachPage />} />
         <Route path="coverage" element={<CoveragePage />} />
         <Route path="source-monitor" element={<SourceMonitorPage />} />
         <Route path="integrations" element={<IntegrationsPage />} />

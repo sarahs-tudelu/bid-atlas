@@ -5,6 +5,7 @@ from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from ..dependencies import get_catalog, get_jurisdictions
+from ..services.canopy import search_profile_payload
 from ..services.catalog import JurisdictionCatalog, ProjectCatalog, SearchFilters
 
 
@@ -41,6 +42,11 @@ def project(project_id: str, catalog: ProjectCatalog = Depends(get_catalog)) -> 
     return match
 
 
+@router.get("/search-presets")
+def search_presets() -> dict:
+    return {"presets": search_profile_payload()}
+
+
 @router.get("/search")
 def search(
     keywords: str = Query(default="", max_length=500),
@@ -51,6 +57,7 @@ def search(
     due: Literal["all", "today", "7-days", "14-days"] = "all",
     freshness: str = Query(default="all", max_length=40),
     readiness: Literal["all", "bid-ready"] = "all",
+    profile: str = Query(default="", max_length=80),
     include_archived: bool = Query(default=False, alias="includeArchived"),
     page: int = Query(default=1, ge=1),
     limit: int = Query(default=10),
@@ -66,6 +73,7 @@ def search(
             due=due,
             freshness=freshness,
             readiness=readiness,
+            profile=profile,
             include_archived=include_archived,
             page=page,
             limit=limit,

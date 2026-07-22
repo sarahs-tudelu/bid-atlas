@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from mangum import Mangum
 
 from .api.catalog import router as catalog_router
+from .api.outreach import router as outreach_router
 from .api.workspace import router as workspace_router
 from .config import settings
 
@@ -24,6 +25,7 @@ def create_app() -> FastAPI:
         allow_headers=["content-type", "x-bidatlas-user"],
     )
     app.include_router(catalog_router)
+    app.include_router(outreach_router)
     app.include_router(workspace_router)
 
     @app.get("/health", tags=["operations"])

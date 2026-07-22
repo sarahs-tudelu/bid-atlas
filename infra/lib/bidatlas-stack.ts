@@ -7,6 +7,7 @@ import * as origins from "aws-cdk-lib/aws-cloudfront-origins";
 import * as dynamodb from "aws-cdk-lib/aws-dynamodb";
 import * as events from "aws-cdk-lib/aws-events";
 import * as targets from "aws-cdk-lib/aws-events-targets";
+import * as iam from "aws-cdk-lib/aws-iam";
 import * as lambda from "aws-cdk-lib/aws-lambda";
 import * as logs from "aws-cdk-lib/aws-logs";
 import * as s3 from "aws-cdk-lib/aws-s3";
@@ -19,6 +20,7 @@ export class BidAtlasStack extends cdk.Stack {
 
     cdk.Tags.of(this).add("Project", "BidAtlas");
     const repositoryRoot = path.resolve(__dirname, "..", "..");
+    const samApiKeyParameterName = this.node.tryGetContext("samApiKeyParameterName") as string | undefined;
 
     const workspaceTable = new dynamodb.Table(this, "WorkspaceTable", {
       partitionKey: { name: "owner", type: dynamodb.AttributeType.STRING },
@@ -113,13 +115,13 @@ export class BidAtlasStack extends cdk.Stack {
     catalogBucket.grantRead(apiFunction);
     apiFunction.node.addDependency(catalogDeployment);
 
-    const newJerseyRefreshFunction = new lambda.Function(this, "NewJerseyRefreshFunction", {
+    const northeastRefreshFunction = new lambda.Function(this, "NortheastRefreshFunction", {
       runtime: lambda.Runtime.PYTHON_3_12,
       architecture: lambda.Architecture.X86_64,
-      handler: "app.jobs.refresh_new_jersey.handler",
+      handler: "app.jobs.refresh_northeast.handler",
       memorySize: 512,
-      timeout: cdk.Duration.seconds(60),
-      logGroup: new logs.LogGroup(this, "NewJerseyRefreshLogGroup", {
+      timeout: cdk.Duration.minutes(5),
+      logGroup: new logs.LogGroup(this, "NortheastRefreshLogGroup", {
         retention: logs.RetentionDays.ONE_WEEK,
         removalPolicy: cdk.RemovalPolicy.DESTROY,
       }),
@@ -160,16 +162,32 @@ export class BidAtlasStack extends cdk.Stack {
         BIDATLAS_DATA_DIR: "/var/task/data-export",
         BIDATLAS_CATALOG_BUCKET: catalogBucket.bucketName,
         BIDATLAS_CATALOG_KEY: "current-projects.json",
+        ...(samApiKeyParameterName
+          ? { BIDATLAS_SAM_API_KEY_PARAMETER: samApiKeyParameterName }
+          : {}),
       },
     });
-    catalogBucket.grantReadWrite(newJerseyRefreshFunction);
-    newJerseyRefreshFunction.node.addDependency(catalogDeployment);
+    catalogBucket.grantReadWrite(northeastRefreshFunction);
+    northeastRefreshFunction.node.addDependency(catalogDeployment);
 
-    new events.Rule(this, "DailyNewJerseyRefresh", {
-      description: "Refresh official NJ DPMC and NJDOT construction advertisements daily.",
+    if (samApiKeyParameterName) {
+      northeastRefreshFunction.addToRolePolicy(new iam.PolicyStatement({
+        actions: ["ssm:GetParameter"],
+        resources: [
+          cdk.Stack.of(this).formatArn({
+            service: "ssm",
+            resource: "parameter",
+            resourceName: samApiKeyParameterName.replace(/^\/+/, ""),
+          }),
+        ],
+      }));
+    }
+
+    new events.Rule(this, "DailyNortheastRefresh", {
+      description: "Refresh official Northeast construction and canopy opportunity sources daily.",
       schedule: events.Schedule.cron({ minute: "15", hour: "10" }),
       targets: [
-        new targets.LambdaFunction(newJerseyRefreshFunction, {
+        new targets.LambdaFunction(northeastRefreshFunction, {
           retryAttempts: 2,
         }),
       ],
@@ -270,8 +288,8 @@ function handler(event) {
     new cdk.CfnOutput(this, "WorkspaceTableName", { value: workspaceTable.tableName });
     new cdk.CfnOutput(this, "DocumentsBucketName", { value: documentsBucket.bucketName });
     new cdk.CfnOutput(this, "CatalogBucketName", { value: catalogBucket.bucketName });
-    new cdk.CfnOutput(this, "NewJerseyRefreshFunctionName", {
-      value: newJerseyRefreshFunction.functionName,
+    new cdk.CfnOutput(this, "NortheastRefreshFunctionName", {
+      value: northeastRefreshFunction.functionName,
     });
   }
 }

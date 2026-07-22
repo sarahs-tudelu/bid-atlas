@@ -1,16 +1,16 @@
 from __future__ import annotations
 
-import copy
 import html
 import json
 import re
-from collections import Counter
 from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
 from html.parser import HTMLParser
 from typing import Any, Callable
 from urllib.parse import urljoin, urlparse
 from urllib.request import Request, urlopen
+
+from .source_refresh import merge_source_snapshot
 
 
 DPMC_SOURCE_ID = "new-jersey-dpmc-construction-advertisements"
@@ -315,6 +315,8 @@ def parse_dpmc_projects(
         "lastChecked": checked_at,
         "url": DPMC_SOURCE_URL,
         "jurisdiction": "New Jersey",
+        "stateCode": "NJ",
+        "coverageField": "procurement",
         "note": "Official State construction advertisements with project number, scope, location, estimated cost, due-date revisions, and public advertisement PDFs.",
     }
     return NewJerseySourceResult(DPMC_SOURCE_ID, projects, source)
@@ -384,6 +386,8 @@ def parse_njdot_projects(
         "lastChecked": checked_at,
         "url": NJDOT_SOURCE_URL,
         "jurisdiction": "New Jersey",
+        "stateCode": "NJ",
+        "coverageField": "dotBidding",
         "note": "Official NJDOT advertised construction projects and public Notice to Contractors PDFs. Bid Express remains the submission and amendment system of record.",
     }
     return NewJerseySourceResult(NJDOT_SOURCE_ID, projects, source)
@@ -431,79 +435,6 @@ def fetch_new_jersey_sources(
     return results, warnings
 
 
-def _project_state(project: dict[str, Any]) -> str | None:
-    state = str(project.get("state") or "").strip().upper()
-    if state == "NEW JERSEY":
-        return "NJ"
-    return state or None
-
-
-def _project_timestamp(project: dict[str, Any]) -> float:
-    raw = project.get("bidDate") or project.get("postedAt") or project.get("updatedAt")
-    if not isinstance(raw, str):
-        return 0
-    try:
-        return datetime.fromisoformat(raw.replace("Z", "+00:00")).timestamp()
-    except ValueError:
-        return 0
-
-
-def _refresh_aggregates(snapshot: dict[str, Any], refreshed_at: str) -> None:
-    projects = snapshot.get("projects", [])
-    sources = snapshot.get("sources", [])
-    stage_counts = Counter(str(project.get("stage") or "unclassified") for project in projects)
-    state_counts = Counter(state for project in projects if (state := _project_state(project)))
-    source_counts = Counter(str(project.get("sourceId") or "") for project in projects)
-    contractor_names = {
-        _clean_text(str(participant.get("organization") or participant.get("name") or "")).casefold()
-        for project in projects
-        for participant in project.get("participants", [])
-        if participant.get("role") in {"contractor", "bidder"}
-        and (participant.get("organization") or participant.get("name"))
-    }
-    document_indexed = sum(bool(project.get("documentTextIndexed")) for project in projects)
-
-    inventory = snapshot.setdefault("inventory", {})
-    inventory.update(
-        {
-            "mode": "aws-snapshot",
-            "totalProjects": len(projects),
-            "stageCounts": dict(stage_counts),
-            "stateCounts": dict(state_counts),
-            "sourceCounts": dict(source_counts),
-            "documentTextIndexedProjects": document_indexed,
-            "contractorOrganizations": len(contractor_names),
-            "refreshedAt": refreshed_at,
-        }
-    )
-
-    coverage = snapshot.setdefault("coverage", {})
-    coverage["asOf"] = refreshed_at
-    coverage["loadedProjectRecords"] = len(projects)
-    coverage["documentTextIndexedProjects"] = document_indexed
-    coverage["connectedSourceGroups"] = sum(source.get("status") == "live" for source in sources)
-    for state in coverage.get("states", []):
-        code = str(state.get("code") or "").upper()
-        state["loadedProjects"] = state_counts.get(code, 0)
-        if code == "NJ":
-            state["procurement"] = (
-                "partial"
-                if any(
-                    source.get("id") == DPMC_SOURCE_ID and source.get("status") == "live"
-                    for source in sources
-                )
-                else "identified"
-            )
-            state["dotBidding"] = (
-                "partial"
-                if any(
-                    source.get("id") == NJDOT_SOURCE_ID and source.get("status") == "live"
-                    for source in sources
-                )
-                else "identified"
-            )
-
-
 def merge_new_jersey_snapshot(
     snapshot: dict[str, Any],
     results: list[NewJerseySourceResult],
@@ -511,58 +442,21 @@ def merge_new_jersey_snapshot(
     warnings: list[str] | None = None,
     refreshed_at: str | None = None,
 ) -> dict[str, Any]:
-    updated = copy.deepcopy(snapshot)
-    checked_at = refreshed_at or datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-    successful_ids = {result.source_id for result in results}
-
-    existing_projects = [
-        project for project in updated.get("projects", []) if project.get("sourceId") not in successful_ids
-    ]
-    incoming_projects = [project for result in results for project in result.projects]
-    stage_rank = {
-        "bidding": 0,
-        "bid-opened": 1,
-        "design": 2,
-        "planning": 3,
-        "permitting": 4,
-        "awarded": 5,
-        "construction": 6,
-        "completed": 7,
-        "cancelled": 8,
-        "unclassified": 9,
-    }
-    updated["projects"] = sorted(
-        [*existing_projects, *incoming_projects],
-        key=lambda project: (
-            stage_rank.get(str(project.get("stage")), 9),
-            -_project_timestamp(project),
-            str(project.get("id") or ""),
+    return merge_source_snapshot(
+        snapshot,
+        results,
+        configured_source_ids={DPMC_SOURCE_ID, NJDOT_SOURCE_ID},
+        source_coverage={
+            DPMC_SOURCE_ID: (("NJ",), "procurement"),
+            NJDOT_SOURCE_ID: (("NJ",), "dotBidding"),
+        },
+        warnings=warnings,
+        warning_prefixes=(
+            "NJ DPMC construction advertisements:",
+            "NJDOT current advertised projects:",
         ),
+        refreshed_at=refreshed_at,
     )
-
-    source_by_id = {source.get("id"): source for source in updated.get("sources", [])}
-    for result in results:
-        source_by_id[result.source_id] = result.source
-    for source_id in {DPMC_SOURCE_ID, NJDOT_SOURCE_ID} - successful_ids:
-        existing_source = source_by_id.get(source_id)
-        if existing_source:
-            source_by_id[source_id] = {
-                **existing_source,
-                "status": "degraded",
-                "lastChecked": checked_at,
-                "note": f"{existing_source.get('note', '').rstrip()} Last refresh failed; retained records may be stale.".strip(),
-            }
-    updated["sources"] = list(source_by_id.values())
-    updated["generatedAt"] = checked_at
-
-    existing_warnings = [
-        warning
-        for warning in updated.get("warnings", [])
-        if not str(warning).startswith(("NJ DPMC construction advertisements:", "NJDOT current advertised projects:"))
-    ]
-    updated["warnings"] = [*existing_warnings, *(warnings or [])]
-    _refresh_aggregates(updated, checked_at)
-    return updated
 
 
 def compact_json(snapshot: dict[str, Any]) -> bytes:

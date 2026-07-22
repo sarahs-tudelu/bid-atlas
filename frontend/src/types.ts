@@ -28,6 +28,42 @@ export interface ProjectParticipant {
   sourceUrl?: string;
 }
 
+export interface CanopyFit {
+  score: number;
+  band: "high" | "possible" | "low";
+  reasons: string[];
+}
+
+export interface SearchPreset {
+  id: string;
+  label: string;
+  description: string;
+  minimumScore: number;
+  states: string[];
+}
+
+export interface OutreachContact {
+  name: string;
+  email: string;
+  phone: string;
+  role: string;
+}
+
+export interface OutreachDraft {
+  projectId: string;
+  projectTitle: string;
+  sourceRecordId: string;
+  to: string;
+  contactName: string;
+  subject: string;
+  body: string;
+  status: "draft" | "sent";
+  contacts: OutreachContact[];
+  canopyFit: CanopyFit;
+  updatedAt?: string;
+  sentAt?: string;
+}
+
 export interface Project {
   id: string;
   sourceId: string;
@@ -52,6 +88,7 @@ export interface Project {
   documents?: ProjectDocument[];
   participants?: ProjectParticipant[];
   documentTextIndexed?: boolean;
+  canopyFit?: CanopyFit;
 }
 
 export interface PageMeta {
@@ -76,6 +113,7 @@ export interface CoverageState {
   name: string;
   procurement: string;
   dotBidding: string;
+  federalProcurement?: string;
   permits: string;
   planning: string;
   loadedProjects: number;

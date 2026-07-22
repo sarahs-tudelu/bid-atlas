@@ -134,6 +134,8 @@ Show published procurement contact, owner/agency, architect/engineer, constructi
 
 Before opening, display only confirmed public plan holders or bidders when the issuer legally publishes them. After opening, ingest bid tabs and award notices and clearly label their effective date.
 
+The active outreach workflow may prefill only email addresses carried by the source record. Users must review the message in BidAtlas and deliver it through their own email client. A browser-generated workspace ID is not sufficient authorization for a backend mail sender.
+
 ## Coverage dashboard that tells the truth
 
 Do not use decorative state percentages. Report operational measures:
@@ -168,10 +170,15 @@ Run daily source discovery, failure repair, sample verification, legal/access re
 
 ## Implemented AWS connector slice
 
-New Jersey is the first state source group migrated from the archived connector runtime into the active AWS application:
+The active AWS application now runs a daily Northeast regional refresh:
 
-- NJ Division of Property Management and Construction contractor project advertisements are refreshed daily as the initial State construction-procurement source.
-- NJDOT current advertised construction projects are refreshed daily from the official Notice to Contractors page.
-- The parser retains published project numbers, scopes, counties, estimated values, deadline revisions, lifecycle evidence, and public advertisement routes without inferring plans or contacts.
-- Results are stored in the private versioned S3 catalog; user searches filter that catalog and never scrape source sites synchronously.
-- Coverage remains `partial`: NJSTART opportunities outside DPMC, local governments, schools, authorities, permits, and planning sources still require separate validated connectors.
+- New Jersey: DPMC construction advertisements and NJDOT advertised projects.
+- New York and Maine: state DOT current construction contract pages.
+- Connecticut and Rhode Island: official state-embedded WebProcure public boards, retrieved completely and then narrowed by canopy relevance.
+- Massachusetts and Pennsylvania: DCR and DGS current construction listings.
+- New Hampshire and Vermont: official DOT/VTrans ArcGIS project services, narrowed to relevant lifecycle records; Vermont factsheets add published project contacts when available.
+- Optional federal layer: active SAM.gov opportunities fanned out by each Northeast state and canopy/proxy query when an SSM-backed API key is configured.
+
+The refresh replaces only successful source partitions. A failed source retains its previous records and becomes degraded; a successfully checked source with no current qualified matches remains live with a zero count. Search traffic always reads the private versioned S3 snapshot and never waits on these publishers.
+
+All state coverage remains `partial`. These adapters represent named agencies or boards, not every municipality, school, authority, permit office, private project, or procurement platform in a state. SAM.gov results are tracked as federal procurement rather than used to inflate statewide procurement coverage.

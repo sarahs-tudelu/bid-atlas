@@ -9,6 +9,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
+from .canopy import SEARCH_PROFILES, profile_matches, score_project
+
 
 ARCHIVED_STAGES = {"completed", "cancelled"}
 OPEN_STAGES = {"planning", "design", "permitting", "bidding", "bid-opened", "awarded", "construction"}
@@ -25,6 +27,7 @@ class SearchFilters:
     due: str = "all"
     freshness: str = "all"
     readiness: str = "all"
+    profile: str = ""
     include_archived: bool = False
     page: int = 1
     limit: int = 10
@@ -138,7 +141,7 @@ class ProjectCatalog:
     def dashboard(self) -> dict[str, Any]:
         return {
             "generatedAt": self.generated_at,
-            "projects": self.projects[:10],
+            "projects": [self._project_response(project) for project in self.projects[:10]],
             "sources": self.sources,
             "coverage": self.coverage,
             "inventory": self.inventory,
@@ -146,7 +149,8 @@ class ProjectCatalog:
         }
 
     def project(self, project_id: str) -> dict[str, Any] | None:
-        return self._projects_by_id.get(project_id)
+        project = self._projects_by_id.get(project_id)
+        return self._project_response(project) if project is not None else None
 
     def search(self, filters: SearchFilters) -> dict[str, Any]:
         page_size = filters.limit if filters.limit in ALLOWED_PAGE_SIZES else 10
@@ -154,6 +158,7 @@ class ProjectCatalog:
         keywords = _parse_keywords(filters.keywords)
         location = filters.location.strip().casefold()
         requested_state = filters.state.strip().casefold()
+        profile = SEARCH_PROFILES.get(filters.profile)
         now = datetime.now(timezone.utc)
 
         matches: list[dict[str, Any]] = []
@@ -167,9 +172,20 @@ class ProjectCatalog:
                 now=now,
             ):
                 continue
-            matches.append(project)
+            fit = score_project(project)
+            if profile is not None and not profile_matches(project, profile, fit):
+                continue
+            matches.append({**project, "canopyFit": fit})
 
-        if filters.readiness == "bid-ready":
+        if profile is not None:
+            matches.sort(
+                key=lambda item: (
+                    -int(item["canopyFit"]["score"]),
+                    _parse_datetime(item.get("bidDate")) or datetime.max.replace(tzinfo=timezone.utc),
+                    item.get("title", ""),
+                )
+            )
+        elif filters.readiness == "bid-ready":
             matches.sort(key=lambda item: (_parse_datetime(item.get("bidDate")) or datetime.max.replace(tzinfo=timezone.utc), item.get("title", "")))
         else:
             matches.sort(key=lambda item: _parse_datetime(item.get("updatedAt")) or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
@@ -191,8 +207,13 @@ class ProjectCatalog:
                 "sourceMode": "aws-snapshot",
                 "nationallyComplete": bool(self.coverage.get("nationallyComplete", False)),
                 "warnings": self.warnings,
+                "profile": profile.id if profile is not None else None,
             },
         }
+
+    @staticmethod
+    def _project_response(project: dict[str, Any]) -> dict[str, Any]:
+        return {**project, "canopyFit": score_project(project)}
 
     def _matches_project(
         self,

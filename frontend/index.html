@@ -3,12 +3,19 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#0d6a51" />
+    <meta name="theme-color" content="#f5f2ea" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#101614" media="(prefers-color-scheme: dark)" />
     <meta
       name="description"
       content="Search verified public construction opportunities with official source evidence."
     />
     <link rel="icon" href="/favicon.svg" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap"
+    />
     <meta property="og:title" content="BidAtlas — Verified construction intelligence" />
     <meta
       property="og:description"
@@ -16,6 +23,22 @@
     />
     <meta property="og:image" content="/og.png" />
     <title>BidAtlas — Verified construction intelligence</title>
+    <script>
+      // Resolve the theme before first paint so the page never flashes the wrong palette.
+      (function () {
+        try {
+          var stored = window.localStorage.getItem("bidatlas.theme");
+          document.documentElement.dataset.theme =
+            stored === "light" || stored === "dark"
+              ? stored
+              : window.matchMedia("(prefers-color-scheme: dark)").matches
+                ? "dark"
+                : "light";
+        } catch (error) {
+          document.documentElement.dataset.theme = "light";
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from typing import Any
 from uuid import uuid4
 
@@ -71,13 +72,17 @@ def create_source_monitor(
 
 @router.get("/integrations")
 def integrations() -> dict[str, Any]:
+    sam_configured = bool(
+        os.getenv("SAM_API_KEY", "").strip()
+        or os.getenv("BIDATLAS_SAM_API_KEY_PARAMETER", "").strip()
+    )
     return {
         "providers": [
             {
                 "id": "sam",
                 "name": "SAM.gov",
-                "configured": False,
-                "detail": "Configure SAM_API_KEY in the AWS runtime to enable keyed federal lookups.",
+                "configured": sam_configured,
+                "detail": "Daily Northeast federal canopy discovery through the official opportunities API.",
             },
             {
                 "id": "apollo",
