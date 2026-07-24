@@ -58,6 +58,7 @@ export class BidAtlasStack extends cdk.Stack {
     const catalogDeployment = new deployments.BucketDeployment(this, "CatalogDeployment", {
       sources: [deployments.Source.asset(path.join(repositoryRoot, "data-export"))],
       destinationBucket: catalogBucket,
+      memoryLimit: 2048,
       cacheControl: [
         deployments.CacheControl.noCache(),
         deployments.CacheControl.noStore(),
