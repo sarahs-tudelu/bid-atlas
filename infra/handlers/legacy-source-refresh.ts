@@ -11,6 +11,12 @@ import {
   getProjectFeed,
 } from "../../legacy/cloudflare/app/lib/connectors";
 import {
+  fetchPublicDotSource,
+} from "../../legacy/cloudflare/app/lib/public-dot-connectors";
+import {
+  fetchNycCityRecordCurrentConstructionSolicitations,
+} from "../../legacy/cloudflare/app/lib/socrata-city-connectors";
+import {
   TEXAS_DOT_SOURCE_ID,
   fetchTexasDotSource,
 } from "../../legacy/cloudflare/app/lib/texas-dot-connector";
@@ -33,6 +39,9 @@ const MANAGED_SOURCE_IDS = new Set(
   ),
 );
 const COVERAGE_FIELDS = ["procurement", "dotBidding", "permits", "planning"] as const;
+const FLORIDA_DOT_SOURCE_ID = "florida-dot-statewide-lettings";
+const NYC_CITY_RECORD_SOURCE_ID = "nyc-city-record-construction-procurement";
+const MAX_COMPLETE_ROUTE_PAGES = 10;
 // ftp.txdot.gov currently omits this DigiCert intermediate from its TLS chain.
 // Pin the public CA certificate while retaining Node's default roots and normal
 // hostname/certificate validation. Intermediate expires 2031-03-29.
@@ -255,6 +264,159 @@ export async function repairTxDotFeed(feed: JsonRecord): Promise<void> {
 }
 
 
+function replaceFeedPartition(
+  feed: JsonRecord,
+  sourceId: string,
+  source: JsonRecord,
+  projects: JsonRecord[],
+): void {
+  const priorSource = (feed.sources ?? []).find(
+    (candidate: JsonRecord) => candidate.id === sourceId,
+  );
+  const warningPrefixes = [
+    `${String(priorSource?.name ?? "")}:`,
+    `${String(source.name ?? "")}:`,
+  ].filter((prefix) => prefix !== ":");
+  feed.sources = (feed.sources ?? []).filter(
+    (candidate: JsonRecord) => candidate.id !== sourceId,
+  );
+  feed.sources.push(source);
+  feed.projects = (feed.projects ?? []).filter(
+    (project: JsonRecord) => project.sourceId !== sourceId,
+  );
+  const projectsById = new Map<string, JsonRecord>();
+  for (const project of projects) {
+    projectsById.set(String(project.id), project);
+  }
+  feed.projects.push(...projectsById.values());
+  feed.warnings = (feed.warnings ?? []).filter(
+    (warning: unknown) =>
+      !warningPrefixes.some((prefix) => String(warning).startsWith(prefix)),
+  );
+}
+
+
+export async function fetchCompleteFloridaDotRoute(): Promise<{
+  projects: JsonRecord[];
+  source: JsonRecord;
+}> {
+  const projectsById = new Map<string, JsonRecord>();
+  let cursor: JsonRecord = { offset: 0 };
+  let lastSource: JsonRecord | undefined;
+  for (let pageNumber = 1; pageNumber <= MAX_COMPLETE_ROUTE_PAGES; pageNumber += 1) {
+    const result = await fetchPublicDotSource(FLORIDA_DOT_SOURCE_ID, {
+      mode: "ingest",
+      lane: "backfill",
+      sourceCursors: { [FLORIDA_DOT_SOURCE_ID]: cursor },
+    });
+    lastSource = result.source;
+    for (const project of result.projects) {
+      projectsById.set(String(project.id), project);
+    }
+    if (!result.page.hasMore) {
+      const projects = [...projectsById.values()];
+      return {
+        projects,
+        source: {
+          ...lastSource,
+          loadedCount: projects.length,
+          snapshotComplete: true,
+          note: `${String(lastSource.note ?? "").trim()} Full current-route refresh loaded ${projects.length.toLocaleString("en-US")} unique projects.`,
+        },
+      };
+    }
+    const nextCursor = result.page.nextCursor;
+    const currentOffset = Number(cursor.offset ?? 0);
+    const nextOffset = Number(nextCursor.offset ?? 0);
+    if (!Number.isSafeInteger(nextOffset) || nextOffset <= currentOffset) {
+      throw new Error("FDOT current-route pagination did not advance");
+    }
+    cursor = nextCursor;
+  }
+  throw new Error(
+    `FDOT current-route refresh exceeded ${MAX_COMPLETE_ROUTE_PAGES} guarded pages`,
+  );
+}
+
+
+export async function integrateVerifiedCollectionRoutes(
+  feed: JsonRecord,
+): Promise<JsonRecord[]> {
+  const collected: JsonRecord[] = [];
+  const [nycOutcome, floridaOutcome] = await Promise.allSettled([
+    fetchNycCityRecordCurrentConstructionSolicitations(),
+    fetchCompleteFloridaDotRoute(),
+  ]);
+
+  if (nycOutcome.status === "fulfilled") {
+    const current = nycOutcome.value;
+    const priorSource = (feed.sources ?? []).find(
+      (source: JsonRecord) => source.id === NYC_CITY_RECORD_SOURCE_ID,
+    );
+    if (!priorSource) {
+      feed.warnings = [
+        ...(feed.warnings ?? []),
+        "NYC City Record procurement notices: expanded current-solicitation route returned without a registered source",
+      ];
+    } else {
+      const checkedAt = new Date().toISOString();
+      replaceFeedPartition(
+        feed,
+        NYC_CITY_RECORD_SOURCE_ID,
+        {
+          ...priorSource,
+          status: "live",
+          recordCount: current.sourceReportedMatches,
+          loadedCount: current.returnedProjects,
+          snapshotComplete: !current.resultLimitReached,
+          lastChecked: checkedAt,
+          note: `${String(priorSource.note ?? "").trim()} Expanded current-solicitation route loaded ${current.returnedProjects.toLocaleString("en-US")} of ${current.sourceReportedMatches.toLocaleString("en-US")} still-open notices ordered by deadline.`,
+        },
+        current.projects,
+      );
+      collected.push({
+        sourceId: NYC_CITY_RECORD_SOURCE_ID,
+        projects: current.returnedProjects,
+        sourceReported: current.sourceReportedMatches,
+        snapshotComplete: !current.resultLimitReached,
+      });
+    }
+  } else {
+    const detail = nycOutcome.reason instanceof Error
+      ? nycOutcome.reason.message
+      : String(nycOutcome.reason);
+    feed.warnings = [
+      ...(feed.warnings ?? []),
+      `NYC City Record procurement notices: expanded current-solicitation route failed: ${detail}`,
+    ];
+  }
+
+  if (floridaOutcome.status === "fulfilled") {
+    replaceFeedPartition(
+      feed,
+      FLORIDA_DOT_SOURCE_ID,
+      floridaOutcome.value.source,
+      floridaOutcome.value.projects,
+    );
+    collected.push({
+      sourceId: FLORIDA_DOT_SOURCE_ID,
+      projects: floridaOutcome.value.projects.length,
+      sourceReported: floridaOutcome.value.source.recordCount,
+      snapshotComplete: floridaOutcome.value.source.snapshotComplete,
+    });
+  } else {
+    const detail = floridaOutcome.reason instanceof Error
+      ? floridaOutcome.reason.message
+      : String(floridaOutcome.reason);
+    feed.warnings = [
+      ...(feed.warnings ?? []),
+      `FDOT Statewide Lettings: expanded current-route refresh failed: ${detail}`,
+    ];
+  }
+  return collected;
+}
+
+
 export async function handler(): Promise<JsonRecord> {
   const bucket = process.env.BIDATLAS_CATALOG_BUCKET;
   const key = process.env.BIDATLAS_CATALOG_KEY ?? "current-projects.json";
@@ -263,6 +425,7 @@ export async function handler(): Promise<JsonRecord> {
   const current = await s3.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
   const snapshot = JSON.parse(await current.Body!.transformToString());
   const feed = await getProjectFeed({ mode: "view" });
+  const collectionRoutes = await integrateVerifiedCollectionRoutes(feed);
   await repairTxDotFeed(feed);
   const refreshed = mergeFeed(snapshot, feed);
   await s3.send(new PutObjectCommand({
@@ -302,6 +465,7 @@ export async function handler(): Promise<JsonRecord> {
     refreshedProjects: (feed.projects ?? []).filter(
       (project: JsonRecord) => MANAGED_SOURCE_IDS.has(String(project.sourceId)),
     ).length,
+    collectionRoutes,
     warnings: refreshed.warnings ?? [],
   };
 }
