@@ -1,9 +1,9 @@
 # BidAtlas
 
-BidAtlas is Tudelu’s construction-opportunity workspace. It collects source-backed public projects, ranks canopy, pergola, and partition-wall potential, admits product-qualified opportunities, and flags records without a published contact as `Research needed`. A verified Tudelu user can review every qualified project and send outreach only when the source published a usable email address. Reviewed emails default to the designated `outreach@tudelugroup.com` marketing mailbox, while an employee can explicitly switch to their own Tudelu Gmail account. A project correspondence inbox then organizes each employee’s Gmail sends and replies and privately files matched attachments with the correct project.
+BidAtlas is Tudelu’s construction-opportunity workspace. It collects source-backed public projects, ranks canopy, pergola, and partition-wall potential, admits product-qualified opportunities, and flags records without a published contact as `Research needed`. A verified `@tudelu.com` user can review every qualified project and send outreach only when the source published a usable email address. Reviewed emails default to the designated `outreach@tudelugroup.com` marketing mailbox, while an employee can explicitly switch to their own Tudelu Gmail account. Team-aware contact history checks whether any verified Tudelu employee has already contacted the project owner. A project correspondence inbox then organizes each employee’s Gmail sends and replies and privately files matched attachments with the correct project.
 
 - Production: <https://d9ubnak81sn3g.cloudfront.net>
-- API documentation: <https://d9ubnak81sn3g.cloudfront.net/api/docs>
+- API documentation: available only in local development at <http://localhost:8000/api/docs>
 - AWS: `us-east-1`, stack `BidAtlasStack`
 
 > Coverage is evidence, not a completeness claim. Counts on the Coverage page describe records observed through connected sources. They do not mean every public or private project in a state has been found.
@@ -116,9 +116,9 @@ Reusable profiles are returned by `GET /api/search-presets`. `direct_national` c
 - Every send requires a signed-in, verified `@tudelu.com` user and an explicit UI confirmation.
 - Marketing is the default sender mode and defaults to the connected `outreach@tudelugroup.com` Instantly account with the Alex Turner identity. The user can select any other account authorized by the connected Instantly token; the employee option uses Gmail `users/me` for the signed-in employee.
 - Marketing replies are assigned to one of the designated Tudelu sales owners and forwarded by the scheduled reply-sync job. Employee-mailbox replies return directly to that employee.
-- Marketing sending has a cross-user per-recipient conditional lock and a 14-day cooldown. Employee sending has a per-user/per-project lock.
+- Every provider mode shares a cross-user, per-recipient conditional send lock. Marketing sending also retains its 14-day per-recipient cooldown.
 - Sent records cannot be edited, regenerated, or resent.
-- Contact history stores only From, To, Subject, Date, short snippets, status, and necessary provider IDs. Full inbox bodies are not persisted.
+- Contact history checks sent outreach and project correspondence across every verified Tudelu workspace, records the initiating employee, and stores only From, To, Subject, Date, short snippets, status, and necessary provider IDs. Full inbox bodies are not persisted, and another employee’s unsent drafts are never exposed.
 - The project inbox searches only source-published project contacts, previously tracked Gmail threads, and project/solicitation references. It does not copy or index the employee’s whole mailbox.
 - Automatic filing prioritizes an existing Gmail thread, then an exact project reference, then unique contact/title evidence. Ambiguous contact matches remain unassigned for a user to file manually.
 - Only attachments on project-scoped messages are copied. They remain private in S3 and can be downloaded only through an authenticated, owner-checked API route with a short-lived signed URL.
@@ -166,16 +166,16 @@ Project Workspace loads project evidence, full product-fit scoring reasons, and 
 5. FastAPI appends the server-resolved selected marketing account's Tudelu signoff in marketing mode or the verified employee’s fixed Tudelu signature in employee mode.
 6. The user can switch only among source-published recipients, choose any provider-authorized marketing account or their employee mailbox, select a designated sales reply owner for marketing, edit subject/body, save, refresh contact context, or re-personalize an unsent draft.
 7. Marketing delivery is preselected. The employee must still review the message and accept the explicit sender/recipient confirmation before any provider call. This release does not create an unattended bulk-send campaign.
-8. `POST /api/outreach/send` revalidates the project, recipient, selected sender, reply owner, subject, body, prior sent state, cooldown, and duplicate-send lock. It calls Instantly for marketing mode or Gmail `users/me/messages/send` for employee mode.
-9. Marketing routes are stored under a system partition so all BidAtlas users share the 14-day per-recipient cooldown. The sent record stores the provider, sender, reply owner, and timestamp; employee sends also retain Gmail message/thread IDs.
+8. `POST /api/outreach/send` revalidates the project, recipient, selected sender, reply owner, subject, body, prior sent state, team-wide contact history, cooldown, and cross-provider duplicate-send lock. It calls Instantly for marketing mode or Gmail `users/me/messages/send` for employee mode.
+9. Marketing routes are stored under a system partition so all BidAtlas users share the 14-day per-recipient cooldown. A separate team partition serializes every provider’s sends to the same recipient. The sent record stores the provider, sender, initiating employee, team-history check, reply owner, and timestamp; employee sends also retain Gmail message/thread IDs.
 10. EventBridge invokes the marketing reply-sync Lambda every five minutes. It groups routes by the marketing account that sent them, polls each applicable account's received messages, matches replies to BidAtlas routes, suppresses deterministic/provider-marked automatic replies, forwards human responses to the selected sales owner with the prospect as Reply-To, and deduplicates provider IDs.
-11. `/api/outreach/history` restores the authenticated user’s drafts and sent records. The marketing reply audit exposes only bounded metadata/snippets to the outreach page.
+11. `/api/outreach/history` restores the authenticated user’s drafts plus sent records from every verified Tudelu employee. Other employees’ unsent drafts remain private. The contact audit exposes only bounded metadata/snippets to the outreach page.
 
 Phone-only opportunities do not enter the email generator. Their card and Project Workspace actions open the published number through a `tel:` link, while the published evidence remains available for manual verification.
 
 ### Project correspondence inbox
 
-1. `/inbox` loads only the signed-in employee’s `correspondence#*` records and project folders.
+1. `/inbox` loads only the signed-in employee’s `correspondence#*` records. Its response includes only projects referenced by stored correspondence or the current page’s matching candidates, capped at 500 options so catalog growth cannot exceed Lambda’s response limit.
 2. `POST /api/inbox/sync` runs a bounded on-demand sync of up to 50 messages; EventBridge also invokes a 250-message version for every connected employee account every five minutes.
 3. The first sync looks back 90 days. Later syncs overlap the prior successful checkpoint by two days and search only published project contacts. Existing outreach/correspondence Gmail threads are fetched directly.
 4. Gmail message payloads are reduced to From, To, Cc, Subject, internal timestamp, direction, labels, a 500-character Gmail snippet, matching evidence, and attachment metadata. Full message bodies are not stored.
@@ -221,18 +221,18 @@ The municipal connectors use the official [Solicitations from PASS open-data ser
 | Method | API | Authentication | Purpose |
 | --- | --- | --- | --- |
 | `GET` | `/health` | Public | Runtime health |
-| `GET` | `/api/meta`, `/dashboard`, `/projects`, `/projects/{id}` | Public | Qualified catalog |
-| `GET` | `/api/search`, `/search-presets` | Public | Filtered discovery and scoring profiles |
-| `GET` | `/api/coverage`, `/source-registry`, `/jurisdictions` | Public | Coverage and source evidence |
-| `GET` | `/api/companies`, `/documents/search` | Public | Qualified-project aggregates |
-| `GET` | `/api/partner-directory` | Public | Contact-only tri-state design, developer, owner, and installer directory |
+| `GET` | `/api/meta`, `/dashboard`, `/projects`, `/projects/{id}` | Session | Qualified catalog |
+| `GET` | `/api/search`, `/search-presets` | Session | Filtered discovery and scoring profiles |
+| `GET` | `/api/coverage`, `/source-registry`, `/jurisdictions` | Session | Coverage and source evidence |
+| `GET` | `/api/companies`, `/documents/search` | Session | Qualified-project aggregates |
+| `GET` | `/api/partner-directory` | Session | Contact-only tri-state design, developer, owner, and installer directory |
 | `GET` | `/api/auth/google/status`, `/google/start`, `/google/callback` | Public OAuth flow | Google configuration and login |
 | `GET` | `/api/auth/me` | Session | Current Tudelu user |
 | `POST` | `/api/auth/logout` | Cookie | End browser session |
 | `GET/POST` | `/api/bid-drafts`, `/api/source-monitors` | Session | Per-user workspace |
-| `GET` | `/api/integrations` | App-gated | Google, SAM, Anthropic, Instantly, and disabled connector status; never secret values |
+| `GET` | `/api/integrations` | Session | Google, SAM, Anthropic, Instantly, and disabled connector status; never secret values |
 | `GET` | `/api/outreach/config` | Session | Safe sender identities and designated sales reply-owner choices |
-| `GET` | `/api/outreach/draft`, `/history` | Session | Per-user outreach records |
+| `GET` | `/api/outreach/draft`, `/history` | Session | Private current-user draft and team-wide sent outreach records |
 | `POST` | `/api/outreach/generate`, `/gmail-history` | Session | Draft and selected-provider metadata sync; employee mode requires Google |
 | `PUT` | `/api/outreach/draft` | Session | Save reviewed draft |
 | `POST` | `/api/outreach/send` | Session | Confirmed Instantly marketing send or signed-in employee Gmail send |
@@ -333,10 +333,9 @@ DynamoDB keys:
 owner=<verified Tudelu email>  recordKey=google#account                  encrypted OAuth account
 owner=<verified Tudelu email>  recordKey=draft#<project-id>             bid draft
 owner=<verified Tudelu email>  recordKey=outreach#<project-id>          draft/history/sent audit
-owner=<verified Tudelu email>  recordKey=gmail-send-lock#<project-id>   conditional transient lock
 owner=<verified Tudelu email>  recordKey=monitor#<uuid>                 source review item
 owner=system#marketing-outreach recordKey=route#<recipient-hash>        latest route and cooldown
-owner=system#marketing-outreach recordKey=send-lock#<recipient-hash>    cross-user transient lock
+owner=system#team-outreach      recordKey=send-lock#<recipient-hash>    cross-user/provider transient lock
 owner=system#marketing-outreach recordKey=reply#<provider-id-hash>      forwarding/suppression audit
 ```
 

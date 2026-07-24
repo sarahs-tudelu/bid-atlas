@@ -56,7 +56,7 @@ Marketing send uses the Instantly email endpoint with the configured `eaccount`.
 
 The shared system partition makes the cooldown and lock apply across every signed-in employee. A route sent within the prior 14 days returns `409`; a concurrent send to the same recipient also returns `409`. The lock is always removed after success or provider failure. No route or sent audit is created when delivery fails.
 
-Employee sends retain the existing per-user/per-project conditional lock and Gmail delivery audit. They do not create a shared marketing route.
+Marketing and employee sends share a team-level per-recipient conditional lock, preventing two employees or providers from sending concurrently to the same project owner. Employee sends do not create a marketing cooldown route, but their Gmail delivery audits participate in team-wide prior-contact history.
 
 ## Response routing
 

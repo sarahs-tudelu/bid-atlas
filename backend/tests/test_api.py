@@ -118,9 +118,11 @@ def test_inbox_is_owner_scoped_and_manual_assignment_uses_qualified_project() ->
         params={"status": "unassigned", "limit": 25},
     )
     assert response.status_code == 200
-    message = next(
-        item for item in response.json()["messages"] if item["messageId"] == "api-message-1"
-    )
+    body = response.json()
+    assert len(response.content) < 1_000_000
+    assert len(body["projects"]) <= 500
+    assert any(item["id"] == project["id"] for item in body["projects"])
+    message = next(item for item in body["messages"] if item["messageId"] == "api-message-1")
     assert "key" not in message["attachments"][0]
     assert message["attachments"][0]["downloadUrl"].endswith("/api-message-1/0")
 

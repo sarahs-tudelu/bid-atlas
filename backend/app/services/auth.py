@@ -16,7 +16,14 @@ OAUTH_STATE_TTL_SECONDS = 10 * 60
 
 def is_tudelu_identity(email: str, email_verified: bool) -> bool:
     normalized = email.strip().casefold()
-    return email_verified and normalized.endswith(f"@{TUDELU_DOMAIN}") and normalized.count("@") == 1
+    local_part, separator, domain = normalized.rpartition("@")
+    return (
+        email_verified
+        and bool(local_part)
+        and separator == "@"
+        and domain == TUDELU_DOMAIN
+        and normalized.count("@") == 1
+    )
 
 
 def _encode(value: bytes) -> str:

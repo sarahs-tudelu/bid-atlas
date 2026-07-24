@@ -58,7 +58,12 @@ def require_user(
     if not email:
         raise HTTPException(status_code=401, detail="Your session has expired")
     account = store.get(email, "google#account")
-    if not account or not is_tudelu_identity(str(account.get("email") or ""), True):
+    account_email = str((account or {}).get("email") or "").strip().casefold()
+    if (
+        not account
+        or account_email != email
+        or not is_tudelu_identity(account_email, True)
+    ):
         raise HTTPException(status_code=401, detail="Reconnect your Tudelu Google account")
     return public_user(account)
 

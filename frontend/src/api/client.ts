@@ -1,4 +1,5 @@
 const API_BASE = (import.meta.env.VITE_API_BASE_URL ?? "").replace(/\/$/, "");
+export const AUTH_REQUIRED_EVENT = "bidatlas:auth-required";
 
 export class ApiError extends Error {
   constructor(
@@ -24,6 +25,9 @@ export async function apiRequest<T>(
   });
 
   if (!response.ok) {
+    if (response.status === 401 && typeof window !== "undefined") {
+      window.dispatchEvent(new Event(AUTH_REQUIRED_EVENT));
+    }
     let message = `Request failed (${response.status})`;
     try {
       const body = (await response.json()) as { detail?: string };

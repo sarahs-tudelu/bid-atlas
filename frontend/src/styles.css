@@ -1141,6 +1141,15 @@ kbd {
 .gmail-history-panel { display: grid; gap: 16px; padding: 25px; border: 1px solid var(--line); background: var(--panel); }
 .gmail-history-panel h2 { margin: 0; font-size: 24px; letter-spacing: -0.04em; }
 .gmail-history-panel > small { color: var(--muted); line-height: 1.5; }
+.team-contact-alert {
+  display: grid;
+  gap: 4px;
+  padding: 12px 14px;
+  border: 1px solid color-mix(in srgb, var(--amber) 45%, var(--line));
+  background: color-mix(in srgb, var(--amber) 10%, var(--panel));
+  color: var(--amber-ink);
+}
+.team-contact-alert span { font-size: 12px; line-height: 1.45; }
 .gmail-thread { display: grid; gap: 8px; padding: 12px; border: 1px solid var(--line); background: var(--panel-sunk); }
 .gmail-thread > div { display: grid; gap: 4px; padding-bottom: 10px; border-bottom: 1px solid var(--line); }
 .gmail-thread > div:last-child { padding-bottom: 0; border-bottom: 0; }

@@ -5,6 +5,7 @@ This document defines BidAtlas’s employee-mailbox correspondence workflow. It 
 ## Product behavior
 
 - `/inbox` shows sent and received Gmail correspondence grouped into admitted project folders.
+- The Inbox API returns only correspondence-referenced folders and current-page candidate projects, capped at 500 options; it never serializes the full opportunity catalog.
 - An employee Gmail send from `/outreach` creates a `correspondence#<gmail-message-id>` record immediately.
 - A scheduled Lambda and the **Sync Gmail now** action discover replies and other messages involving source-published project contacts.
 - High-confidence messages are filed automatically. Ambiguous messages remain in **Needs assignment** and can be filed manually.
@@ -120,6 +121,8 @@ The job enumerates only `google#account` records, never logs an account email or
 | `GET` | `/api/inbox/attachments/{messageId}/{index}` | Owner-checked, short-lived private download |
 
 All routes require the normal signed session. The owner value always comes from `require_user`; no request field can select another employee partition.
+
+The Inbox remains owner-scoped. Outreach contact context is separately team-aware: it may read minimized sent correspondence metadata across verified Tudelu partitions to show that another employee already contacted the same project owner, but it never exposes another employee’s unsent draft or general inbox.
 
 ## Operational checks
 

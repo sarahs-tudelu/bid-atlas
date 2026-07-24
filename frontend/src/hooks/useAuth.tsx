@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 
-import { ApiError, apiRequest } from "../api/client";
+import { AUTH_REQUIRED_EVENT, ApiError, apiRequest } from "../api/client";
 import type { AuthUser } from "../types";
 
 
@@ -17,6 +17,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+
+  useEffect(() => {
+    const requireAuthentication = () => {
+      setUser(null);
+      setError("");
+    };
+    window.addEventListener(AUTH_REQUIRED_EVENT, requireAuthentication);
+    return () => window.removeEventListener(AUTH_REQUIRED_EVENT, requireAuthentication);
+  }, []);
 
   useEffect(() => {
     let active = true;

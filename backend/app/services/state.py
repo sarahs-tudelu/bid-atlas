@@ -115,6 +115,36 @@ class WorkspaceStore:
                 if item_owner == owner and record_key.startswith(prefix)
             ]
 
+    def list_all_prefix(self, prefix: str) -> list[tuple[str, dict[str, Any]]]:
+        """Return records with a key prefix across every workspace owner."""
+
+        table = self._dynamo_table()
+        if table is not None:
+            from boto3.dynamodb.conditions import Attr
+
+            records: list[tuple[str, dict[str, Any]]] = []
+            scan: dict[str, Any] = {
+                "FilterExpression": Attr("recordKey").begins_with(prefix),
+                "ProjectionExpression": "#owner, payload",
+                "ExpressionAttributeNames": {"#owner": "owner"},
+            }
+            while True:
+                response = table.scan(**scan)
+                records.extend(
+                    (str(item["owner"]), json.loads(item["payload"]))
+                    for item in response.get("Items", [])
+                )
+                last_key = response.get("LastEvaluatedKey")
+                if not last_key:
+                    return records
+                scan["ExclusiveStartKey"] = last_key
+        with self._lock:
+            return [
+                (owner, dict(value))
+                for (owner, record_key), value in self._memory.items()
+                if record_key.startswith(prefix)
+            ]
+
     def list_google_accounts(self) -> list[tuple[str, dict[str, Any]]]:
         """Return connected Google accounts for the background Gmail sync job."""
 

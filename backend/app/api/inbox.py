@@ -22,6 +22,7 @@ from .auth import require_user
 
 
 router = APIRouter(prefix="/api/inbox", tags=["inbox"])
+MAX_INBOX_PROJECT_OPTIONS = 500
 
 
 class ProjectAssignment(BaseModel):
@@ -44,7 +45,10 @@ def _account(owner: str, store: WorkspaceStore) -> dict[str, Any]:
     return account
 
 
-def _public_message(record: dict[str, Any]) -> dict[str, Any]:
+def _public_message(
+    record: dict[str, Any],
+    catalog: ProjectCatalog | None = None,
+) -> dict[str, Any]:
     attachments = []
     message_id = str(record.get("messageId") or "")
     for index, attachment in enumerate(record.get("attachments") or []):
@@ -57,7 +61,29 @@ def _public_message(record: dict[str, Any]) -> dict[str, Any]:
                 "downloadUrl": f"/api/inbox/attachments/{message_id}/{index}",
             }
         )
-    return {**record, "attachments": attachments}
+    public = {**record, "attachments": attachments}
+    if catalog is None:
+        return public
+
+    project = catalog.project(str(record.get("projectId") or ""))
+    if project is not None:
+        public.update(
+            {
+                "projectId": str(project["id"]),
+                "projectTitle": str(project.get("title") or ""),
+                "sourceRecordId": str(
+                    project.get("sourceRecordId") or project["id"]
+                ),
+            }
+        )
+    candidates: list[str] = []
+    for candidate_id in record.get("candidateProjectIds") or []:
+        candidate = catalog.project(str(candidate_id))
+        canonical_id = str(candidate["id"]) if candidate is not None else ""
+        if canonical_id and canonical_id not in candidates:
+            candidates.append(canonical_id)
+    public["candidateProjectIds"] = candidates
+    return public
 
 
 @router.get("")
@@ -85,11 +111,23 @@ def inbox(
         if record_project_id:
             project_counts[record_project_id] = project_counts.get(record_project_id, 0) + 1
 
+    requested_project = catalog.project(project_id) if project_id else None
+    requested_project_ids = {
+        project_id,
+        *(
+            str(value)
+            for value in (requested_project or {}).get("duplicateProjectIds") or []
+            if value
+        ),
+    }
+    if requested_project is not None:
+        requested_project_ids.add(str(requested_project["id"]))
+
     normalized_query = query.strip().casefold()
     records = []
     for record in all_records:
         record_project_id = str(record.get("projectId") or "")
-        if project_id and record_project_id != project_id:
+        if project_id and record_project_id not in requested_project_ids:
             continue
         if status == "assigned" and not record_project_id:
             continue
@@ -107,20 +145,62 @@ def inbox(
     total_pages = max(1, math.ceil(total / limit))
     active_page = min(page, total_pages)
     start = (active_page - 1) * limit
+    page_records = records[start : start + limit]
     account = store.get(owner, "google#account") or {}
     scopes = {str(value) for value in account.get("scopes", [])}
+
+    project_options: dict[str, dict[str, Any]] = {}
+    canonical_counts: dict[str, int] = {}
+    for counted_id, count in project_counts.items():
+        project = catalog.project(counted_id)
+        if project is None:
+            continue
+        canonical_id = str(project["id"])
+        project_options[canonical_id] = project
+        canonical_counts[canonical_id] = canonical_counts.get(canonical_id, 0) + count
+
+    prioritized_ids: list[str] = []
+
+    def add_project_option(candidate_id: str) -> None:
+        project = catalog.project(candidate_id)
+        if project is None:
+            return
+        canonical_id = str(project["id"])
+        project_options[canonical_id] = project
+        if canonical_id not in prioritized_ids:
+            prioritized_ids.append(canonical_id)
+
+    if project_id:
+        add_project_option(project_id)
+    for record in page_records:
+        add_project_option(str(record.get("projectId") or ""))
+        for candidate_id in record.get("candidateProjectIds") or []:
+            add_project_option(str(candidate_id))
+    for counted_id, _ in sorted(
+        canonical_counts.items(),
+        key=lambda item: (-item[1], item[0]),
+    ):
+        if counted_id not in prioritized_ids:
+            prioritized_ids.append(counted_id)
+
+    option_count = len(prioritized_ids)
     projects = [
         {
-            "id": str(project["id"]),
-            "title": str(project.get("title") or ""),
-            "sourceRecordId": str(project.get("sourceRecordId") or project["id"]),
-            "messageCount": project_counts.get(str(project["id"]), 0),
+            "id": project_id,
+            "title": str(project_options[project_id].get("title") or ""),
+            "sourceRecordId": str(
+                project_options[project_id].get("sourceRecordId") or project_id
+            ),
+            "messageCount": canonical_counts.get(project_id, 0),
         }
-        for project in catalog.projects
+        for project_id in prioritized_ids[:MAX_INBOX_PROJECT_OPTIONS]
     ]
     projects.sort(key=lambda item: (-item["messageCount"], item["title"]))
     return {
-        "messages": [_public_message(record) for record in records[start : start + limit]],
+        "messages": [
+            _public_message(record, catalog)
+            for record in page_records
+        ],
         "projects": projects,
         "meta": {
             "total": total,
@@ -132,6 +212,8 @@ def inbox(
             "unassignedMessages": sum(1 for item in all_records if not item.get("projectId")),
             "gmailConnected": bool(account),
             "gmailReadAccess": GMAIL_READONLY_SCOPE in scopes,
+            "availableProjectOptions": len(projects),
+            "projectOptionsTruncated": option_count > len(projects),
             "sync": store.get(owner, "gmail-inbox#state"),
         },
     }
@@ -173,7 +255,7 @@ def assign_project(
     message = assign_correspondence_project(store, str(user["email"]), message_id, project)
     if message is None:
         raise HTTPException(status_code=404, detail="Correspondence not found")
-    return {"message": _public_message(message)}
+    return {"message": _public_message(message, catalog)}
 
 
 @router.get("/attachments/{message_id}/{attachment_index}")

@@ -110,7 +110,10 @@ export function OutreachPage() {
 
   const send = async (): Promise<void> => {
     if (!draft || draft.status === "sent") return;
-    if (!window.confirm(`Send this message from ${draft.senderEmail} to ${draft.to}?`)) return;
+    const priorContactWarning = draft.priorContactCount
+      ? ` Team history contains ${draft.priorContactCount} prior message${draft.priorContactCount === 1 ? "" : "s"} involving this project owner, logged by ${draft.priorContactedBy?.join(", ") || "another Tudelu employee"}.`
+      : "";
+    if (!window.confirm(`Send this message from ${draft.senderEmail} to ${draft.to}?${priorContactWarning}`)) return;
     setSaveStatus(draft.senderMode === "marketing" ? "Sending through the marketing mailbox…" : "Sending through Gmail…");
     try {
       const response = await apiRequest<DraftResponse>("/api/outreach/send", {
@@ -383,21 +386,35 @@ export function OutreachPage() {
 
             <section className="gmail-history-panel">
               <div className="draft-form-heading">
-                <div><p className="eyebrow">CONTACT CONTEXT</p><h2>Prior contact</h2></div>
+                <div><p className="eyebrow">TUDELU TEAM CONTACT CONTEXT</p><h2>Prior contact</h2></div>
                 <button className="link-button" type="button" onClick={() => void refreshGmailHistory()}>Refresh</button>
               </div>
+              {draft.priorContactCount ? (
+                <div className="team-contact-alert" role="status">
+                  <strong>
+                    {draft.priorContactCount} prior team message{draft.priorContactCount === 1 ? "" : "s"} found
+                  </strong>
+                  <span>
+                    Contacted by {draft.priorContactedBy?.join(", ") || "a Tudelu employee"}
+                    {draft.lastPriorContactAt ? ` · Latest ${draft.lastPriorContactAt}` : ""}
+                  </span>
+                </div>
+              ) : null}
               {draft.emailHistory?.length ? draft.emailHistory.map((thread) => (
                 <article className="gmail-thread" key={thread.threadId}>
                   {thread.messages.map((message) => (
                     <div key={message.id}>
                       <strong>{message.subject || "(No subject)"}</strong>
-                      <small>{message.from} → {message.to} · {message.date}</small>
+                      <small>
+                        {message.from} → {message.to} · {message.date}
+                        {message.sentBy ? ` · Logged by ${message.sentBy}` : ""}
+                      </small>
                       <p>{message.snippet}</p>
                     </div>
                   ))}
                 </article>
-              )) : <p className="evidence-empty">No prior messages with this published contact were found.</p>}
-              <small>Only headers and short snippets are retained with the draft; full inbox bodies are not stored.</small>
+              )) : <p className="evidence-empty">No prior messages from any connected Tudelu employee were found.</p>}
+              <small>Team history checks sent outreach and project correspondence across connected Tudelu accounts. Only headers and short snippets are retained; full inbox bodies are not stored.</small>
             </section>
           </div>
         </section>
@@ -415,19 +432,22 @@ export function OutreachPage() {
       ) : null}
 
       <section className="outreach-history">
-        <div className="section-heading"><div><p className="eyebrow">TUDELU WORKSPACE</p><h2>Draft and sent history</h2></div></div>
+        <div className="section-heading"><div><p className="eyebrow">TUDELU TEAM WORKSPACE</p><h2>Draft and sent history</h2></div></div>
         <AsyncState loading={history.loading} error={history.error} onRetry={history.refetch}>
           {history.data?.history.length ? (
             <div className="history-list">
               {history.data.history.map((item) => (
-                <Link key={item.projectId} to={`/outreach?project=${encodeURIComponent(item.projectId)}`}>
+                <Link
+                  key={`${item.workspaceOwner ?? item.sentBy ?? ""}:${item.projectId}:${item.sentAt ?? item.updatedAt ?? ""}`}
+                  to={`/outreach?project=${encodeURIComponent(item.projectId)}`}
+                >
                   <span className={`stage-badge ${item.status === "sent" ? "stage-bidding" : ""}`}>{item.status}</span>
                   <strong>{item.projectTitle}</strong>
                   <small>{item.to} {item.sentBy ? `· ${item.sentBy}` : ""}</small>
                 </Link>
               ))}
             </div>
-          ) : <p className="evidence-empty">No outreach drafts have been saved for this Tudelu account.</p>}
+          ) : <p className="evidence-empty">No outreach drafts or team sends have been logged.</p>}
         </AsyncState>
       </section>
     </main>

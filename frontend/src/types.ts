@@ -74,6 +74,7 @@ export interface GmailMessageSummary {
   subject: string;
   date: string;
   snippet: string;
+  sentBy?: string;
 }
 
 export interface GmailThreadSummary {
@@ -138,6 +139,8 @@ export interface InboxResponse {
     unassignedMessages: number;
     gmailConnected: boolean;
     gmailReadAccess: boolean;
+    availableProjectOptions?: number;
+    projectOptionsTruncated?: boolean;
     sync: {
       lastSuccessfulSync: string;
       messagesStored: number;
@@ -168,6 +171,7 @@ export interface OutreachDraft {
   updatedAt?: string;
   sentAt?: string;
   sentBy?: string;
+  workspaceOwner?: string;
   senderMode: "marketing" | "employee";
   senderEmail: string;
   marketingSenderEmail?: string;
@@ -177,7 +181,12 @@ export interface OutreachDraft {
   gmailMessageId?: string;
   gmailThreadId?: string;
   emailHistory?: GmailThreadSummary[];
+  historyScope?: "tudelu-team";
   historySyncedAt?: string;
+  teamHistoryCheckedAt?: string;
+  priorContactCount?: number;
+  priorContactedBy?: string[];
+  lastPriorContactAt?: string;
   generation?: {
     provider: "template" | "anthropic";
     model?: string;

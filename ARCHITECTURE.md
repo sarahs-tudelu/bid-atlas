@@ -45,11 +45,11 @@ CloudFront makes the frontend and API same-origin. The default behavior serves t
 
 ### Public boundary
 
-Health, catalog, search, coverage, source-registry, company, document, and OAuth-start endpoints are public HTTP APIs. Catalog responses have already passed the global qualification gate. Coverage aggregates may describe nonqualified raw records but do not expose those records through project lookup.
+Only health and the minimum Google OAuth bootstrap endpoints are public. Catalog, search, coverage, source-registry, company, document, integration, inbox, and outreach APIs all require the same verified Tudelu session. Production disables FastAPI documentation and OpenAPI endpoints.
 
 ### Authenticated workspace boundary
 
-Bid drafts, source monitors, outreach drafts/history, the project inbox, Gmail history, attachment downloads, and sending depend on `require_user`. The dependency validates an HMAC-signed, expiring HttpOnly cookie and then confirms that the email still has a Google account record in DynamoDB. The browser no longer supplies an identity header.
+Every application-data router depends on `require_user`. The dependency validates an HMAC-signed, expiring HttpOnly cookie, confirms the session email exactly matches a Google account record in DynamoDB, and revalidates the exact `@tudelu.com` domain. The browser no longer supplies an identity header. A frontend-wide 401 signal removes cached authenticated UI state immediately when a session expires.
 
 Every mutable record is partitioned by the normalized verified Google email. User input cannot select another owner partition.
 
@@ -235,7 +235,7 @@ The documents S3 bucket is encrypted, versioned, private, SSL-only, and retained
 
 `AppShell` shows the current email and sign-out. Search pages use URL query parameters as shareable state, including the `product` classification filter. Project cards render product-category evidence separately from the overall fit score, expose plain-language scoring reasons, and use equal-height desktop rows. Project-workspace links carry an allowlisted internal return destination so navigation returns to the originating filtered leads/bids, inbox, dashboard, companies, or documents page. `OutreachPage` keeps selected-project draft state isolated, renders provider metadata, restricts recipients to a source-backed select, defaults to the server-declared marketing identity, permits selection among provider-authorized marketing identities or the employee's Gmail account, restricts marketing reply owners to the server list, requires browser confirmation, and disables mutations after sent status.
 
-`InboxPage` uses URL-driven project, assignment-status, search, and page filters. It shows the owner’s project folders, deterministic matching explanation, manual assignment control, and authenticated attachment links. `BidDeskPage` embeds the project’s latest correspondence and files without weakening the API ownership boundary.
+`InboxPage` uses URL-driven project, assignment-status, search, and page filters. It shows the owner’s project folders, deterministic matching explanation, manual assignment control, and authenticated attachment links. The API returns only correspondence-referenced and current-page candidate projects, capped at 500 options, rather than serializing the full catalog. `BidDeskPage` embeds the project’s latest correspondence and files without weakening the API ownership boundary.
 
 Project cards and Project Workspace derive independent email and phone actions from published participants. The Outreach project picker filters to email-capable projects. Changing sender mode regenerates the draft so its visible signature matches the enforced provider identity. The initial draft is deterministic; the explicit personalization button is the only frontend path that invokes Claude.
 
@@ -249,7 +249,7 @@ The UI gate is a usability boundary; the FastAPI dependency is the authorization
 | `config.py` | environment-derived immutable settings |
 | `dependencies.py` | cached catalog/store construction |
 | `api/auth.py` | OAuth/session HTTP contract and `require_user` |
-| `api/catalog.py` | public validation and discovery contract |
+| `api/catalog.py` | authenticated validation and discovery contract |
 | `api/workspace.py` | authenticated drafts/monitors; safe integration status |
 | `api/outreach.py` | authenticated generate/history/save/send orchestration |
 | `api/inbox.py` | authenticated correspondence listing, sync, manual assignment, and attachment downloads |

@@ -8,6 +8,8 @@ from backend.app.services.google import account_from_oauth, pkce_pair
 
 def test_tudelu_identity_requires_verified_exact_domain() -> None:
     assert is_tudelu_identity("Person@TUDELU.COM", True)
+    assert not is_tudelu_identity("@tudelu.com", True)
+    assert not is_tudelu_identity("person@@tudelu.com", True)
     assert not is_tudelu_identity("person@tudelu.com.example", True)
     assert not is_tudelu_identity("person@example.com", True)
     assert not is_tudelu_identity("person@tudelu.com", False)

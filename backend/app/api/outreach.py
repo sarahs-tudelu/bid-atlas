@@ -13,7 +13,6 @@ from ..services.google import GoogleApiError, gmail_history, send_gmail_message
 from ..services.gmail_inbox import record_sent_correspondence
 from ..services.marketing_outreach import (
     MARKETING_COOLDOWN_DAYS,
-    MARKETING_OWNER,
     SALES_REPLY_OWNERS,
     InstantlyApiError,
     active_marketing_cooldown,
@@ -21,7 +20,6 @@ from ..services.marketing_outreach import (
     default_sales_reply_owner,
     instantly_is_configured,
     marketing_account,
-    marketing_lock_key,
     marketing_reply_history,
     marketing_sender,
     record_marketing_route,
@@ -32,6 +30,13 @@ from ..services.outreach import generate_outreach_draft, validate_draft
 from ..services.partner_directory import PartnerDirectory
 from ..services.qualification import published_contacts
 from ..services.state import WorkspaceStore
+from ..services.team_outreach import (
+    TEAM_OUTREACH_OWNER,
+    merge_contact_history,
+    team_contact_summary,
+    team_outreach_log,
+    team_send_lock_key,
+)
 from .auth import require_user
 
 
@@ -102,6 +107,43 @@ def _sync_gmail_history(
         )
     except GoogleApiError as error:
         raise HTTPException(status_code=502, detail=str(error)) from error
+
+
+def _contact_history_context(
+    owner: str,
+    project: dict[str, Any],
+    store: WorkspaceStore,
+    *,
+    sender_mode: str,
+    recipient: str,
+) -> dict[str, Any]:
+    provider_history = (
+        marketing_reply_history(store, recipient)
+        if sender_mode == "marketing"
+        else _sync_gmail_history(owner, project, store)
+    )
+    team = team_contact_summary(store, project)
+    return {
+        **team,
+        "history": merge_contact_history(team["history"], provider_history),
+        "historyScope": "tudelu-team",
+        "historySyncedAt": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+def _with_history_context(
+    draft: dict[str, Any],
+    context: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        **draft,
+        "emailHistory": context["history"],
+        "historyScope": context["historyScope"],
+        "historySyncedAt": context["historySyncedAt"],
+        "priorContactCount": context["priorContactCount"],
+        "priorContactedBy": context["priorContactedBy"],
+        "lastPriorContactAt": context["lastPriorContactAt"],
+    }
 
 
 def _generate_draft(
@@ -215,9 +257,43 @@ def generate(
     directory: PartnerDirectory = Depends(get_partner_directory),
 ) -> dict[str, Any]:
     owner = user["email"]
+    project = _project_or_404(payload.projectId, catalog, directory)
+    contacts = published_contacts(project)
+    if not contacts:
+        raise HTTPException(
+            status_code=400,
+            detail="This project has a published phone contact but no email contact; use the call option",
+        )
     existing = store.get(owner, f"outreach#{payload.projectId}")
-    if existing is not None and existing.get("status") == "sent":
+    if (
+        existing is not None
+        and existing.get("status") == "sent"
+        and payload.regenerate
+    ):
         raise HTTPException(status_code=409, detail="Sent outreach cannot be regenerated")
+    active_sender_mode = str(
+        existing.get("senderMode") if existing and existing.get("status") == "sent"
+        else payload.senderMode
+    )
+    contact_email = (
+        payload.to.strip().lower()
+        or str((existing or {}).get("to") or "").strip().lower()
+        or contacts[0]["email"]
+    )
+    context = _contact_history_context(
+        owner,
+        project,
+        store,
+        sender_mode=active_sender_mode,
+        recipient=contact_email,
+    )
+    if existing is not None and existing.get("status") == "sent":
+        stored = store.put(
+            owner,
+            f"outreach#{payload.projectId}",
+            _with_history_context(existing, context),
+        )
+        return {"draft": stored, "reused": True}
     if (
         existing is not None
         and not payload.regenerate
@@ -228,32 +304,27 @@ def generate(
             == (payload.marketingSenderEmail.strip().lower() or marketing_sender())
         )
     ):
-        return {"draft": existing, "reused": True}
-    project = _project_or_404(payload.projectId, catalog, directory)
-    if not published_contacts(project):
-        raise HTTPException(
-            status_code=400,
-            detail="This project has a published phone contact but no email contact; use the call option",
+        stored = store.put(
+            owner,
+            f"outreach#{payload.projectId}",
+            _with_history_context(existing, context),
         )
-    contact_email = payload.to.strip().lower() or published_contacts(project)[0]["email"]
-    history = (
-        marketing_reply_history(store, contact_email)
-        if payload.senderMode == "marketing"
-        else _sync_gmail_history(owner, project, store)
-    )
+        return {"draft": stored, "reused": True}
     draft = _generate_draft(
         project,
         user,
-        history,
+        context["history"],
         personalize=payload.personalize,
         recipient=payload.to,
         sender_mode=payload.senderMode,
         marketing_sender_email=payload.marketingSenderEmail,
         reply_owner_email=payload.replyOwnerEmail,
     )
-    draft["emailHistory"] = history
-    draft["historySyncedAt"] = datetime.now(timezone.utc).isoformat()
-    stored = store.put(owner, f"outreach#{payload.projectId}", draft)
+    stored = store.put(
+        owner,
+        f"outreach#{payload.projectId}",
+        _with_history_context(draft, context),
+    )
     return {"draft": stored, "reused": False}
 
 
@@ -270,18 +341,17 @@ def refresh_gmail_history(
     existing = store.get(owner, f"outreach#{payload.projectId}")
     if existing is None:
         raise HTTPException(status_code=404, detail="Generate an email draft before refreshing Gmail history")
+    context = _contact_history_context(
+        owner,
+        project,
+        store,
+        sender_mode=str(existing.get("senderMode") or "marketing"),
+        recipient=str(existing.get("to") or ""),
+    )
     stored = store.put(
         owner,
         f"outreach#{payload.projectId}",
-        {
-            **existing,
-            "emailHistory": (
-                marketing_reply_history(store, str(existing.get("to") or ""))
-                if existing.get("senderMode") == "marketing"
-                else _sync_gmail_history(owner, project, store)
-            ),
-            "historySyncedAt": datetime.now(timezone.utc).isoformat(),
-        },
+        _with_history_context(existing, context),
     )
     return {"draft": stored}
 
@@ -333,6 +403,20 @@ def send(
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
     _validate_published_recipient(draft, project)
+    team = team_contact_summary(store, project)
+    checked_at = datetime.now(timezone.utc).isoformat()
+    draft = {
+        **draft,
+        "emailHistory": merge_contact_history(
+            team["history"],
+            draft.get("emailHistory") or [],
+        ),
+        "historyScope": "tudelu-team",
+        "teamHistoryCheckedAt": checked_at,
+        "priorContactCount": team["priorContactCount"],
+        "priorContactedBy": team["priorContactedBy"],
+        "lastPriorContactAt": team["lastPriorContactAt"],
+    }
 
     marketing_delivery = draft["senderMode"] == "marketing"
     if marketing_delivery:
@@ -345,12 +429,8 @@ def send(
                     f"{MARKETING_COOLDOWN_DAYS}-day cooldown"
                 ),
             )
-    lock_owner = MARKETING_OWNER if marketing_delivery else owner
-    lock_key = (
-        marketing_lock_key(draft["to"])
-        if marketing_delivery
-        else f"gmail-send-lock#{payload.projectId}"
-    )
+    lock_owner = TEAM_OUTREACH_OWNER
+    lock_key = team_send_lock_key(draft["to"])
     if not store.put_if_absent(lock_owner, lock_key, {"projectId": payload.projectId}):
         raise HTTPException(status_code=409, detail="This message is already being sent")
     try:
@@ -428,6 +508,4 @@ def history(
     user: dict[str, Any] = Depends(require_user),
     store: WorkspaceStore = Depends(get_workspace_store),
 ) -> dict[str, Any]:
-    records = store.list_prefix(user["email"], "outreach#")
-    records.sort(key=lambda item: str(item.get("sentAt") or item.get("updatedAt") or ""), reverse=True)
-    return {"history": records}
+    return {"history": team_outreach_log(store, str(user["email"]))}
