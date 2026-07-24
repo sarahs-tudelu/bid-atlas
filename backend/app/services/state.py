@@ -95,13 +95,50 @@ class WorkspaceStore:
         if table is not None:
             from boto3.dynamodb.conditions import Key
 
-            response = table.query(
-                KeyConditionExpression=Key("owner").eq(owner) & Key("recordKey").begins_with(prefix)
-            )
-            return [json.loads(item["payload"]) for item in response.get("Items", [])]
+            items: list[dict[str, Any]] = []
+            query: dict[str, Any] = {
+                "KeyConditionExpression": (
+                    Key("owner").eq(owner) & Key("recordKey").begins_with(prefix)
+                )
+            }
+            while True:
+                response = table.query(**query)
+                items.extend(json.loads(item["payload"]) for item in response.get("Items", []))
+                last_key = response.get("LastEvaluatedKey")
+                if not last_key:
+                    return items
+                query["ExclusiveStartKey"] = last_key
         with self._lock:
             return [
                 dict(value)
                 for (item_owner, record_key), value in self._memory.items()
                 if item_owner == owner and record_key.startswith(prefix)
+            ]
+
+    def list_google_accounts(self) -> list[tuple[str, dict[str, Any]]]:
+        """Return connected Google accounts for the background Gmail sync job."""
+
+        table = self._dynamo_table()
+        if table is not None:
+            from boto3.dynamodb.conditions import Attr
+
+            accounts: list[tuple[str, dict[str, Any]]] = []
+            scan: dict[str, Any] = {
+                "FilterExpression": Attr("recordKey").eq("google#account"),
+                "ProjectionExpression": "#owner, payload",
+                "ExpressionAttributeNames": {"#owner": "owner"},
+            }
+            while True:
+                response = table.scan(**scan)
+                for item in response.get("Items", []):
+                    accounts.append((str(item["owner"]), json.loads(item["payload"])))
+                last_key = response.get("LastEvaluatedKey")
+                if not last_key:
+                    return accounts
+                scan["ExclusiveStartKey"] = last_key
+        with self._lock:
+            return [
+                (owner, dict(payload))
+                for (owner, record_key), payload in self._memory.items()
+                if record_key == "google#account"
             ]

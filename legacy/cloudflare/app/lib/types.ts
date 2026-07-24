@@ -128,6 +128,14 @@ export interface SourceRecord {
   lastChecked: string;
   url: string;
   jurisdiction: string;
+  /** Explicit state metadata used by the AWS snapshot coverage merger. */
+  stateCode?: string;
+  coverageField?:
+    | "procurement"
+    | "dotBidding"
+    | "permits"
+    | "planning"
+    | "federalProcurement";
   note: string;
 }
 

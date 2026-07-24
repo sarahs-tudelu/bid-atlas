@@ -23,6 +23,7 @@ from .source_refresh import SourceRefreshResult
 
 CONNECTICUT_SOURCE_ID = "connecticut-ctsource-canopy-opportunities"
 CONNECTICUT_SOURCE_URL = "https://portal.ct.gov/das/ctsource/bidboard"
+CONNECTICUT_DOT_SOURCE_ID = "connecticut-dot-ctsource-bids"
 RHODE_ISLAND_SOURCE_ID = "rhode-island-ridot-canopy-opportunities"
 RHODE_ISLAND_SOURCE_URL = "https://www.dot.ri.gov/ridotbidding/"
 MASSACHUSETTS_SOURCE_ID = "massachusetts-dcr-construction-bids"
@@ -32,6 +33,7 @@ NEW_HAMPSHIRE_SOURCE_URL = (
     "https://maps.dot.nh.gov/arcgis_server/rest/services/Projects/"
     "NHDOT_PROJECT_PROPOSALS_BY_TYPE/FeatureServer/0"
 )
+NEW_HAMPSHIRE_DOT_BID_SOURCE_ID = "new-hampshire-dot-advertised-bids"
 VERMONT_SOURCE_ID = "vermont-vtrans-project-pipeline"
 VERMONT_SOURCE_URL = (
     "https://maps.vtrans.vermont.gov/arcgis/rest/services/Rail/VTransProjects/FeatureServer"
@@ -58,6 +60,7 @@ class WebProcureConfig:
     customer_id: str
     organization_id: str
     coverage_field: str
+    require_product_fit: bool = True
 
 
 WEBPROCURE_SOURCES = (
@@ -72,6 +75,17 @@ WEBPROCURE_SOURCES = (
         "procurement",
     ),
     WebProcureConfig(
+        CONNECTICUT_DOT_SOURCE_ID,
+        CONNECTICUT_SOURCE_URL,
+        "CT",
+        "Connecticut DOT",
+        "Connecticut Department of Transportation",
+        "51",
+        "162053",
+        "dotBidding",
+        False,
+    ),
+    WebProcureConfig(
         RHODE_ISLAND_SOURCE_ID,
         RHODE_ISLAND_SOURCE_URL,
         "RI",
@@ -80,6 +94,7 @@ WEBPROCURE_SOURCES = (
         "46",
         "130573",
         "dotBidding",
+        False,
     ),
 )
 
@@ -89,6 +104,7 @@ def portal_source_ids() -> set[str]:
         *(config.source_id for config in WEBPROCURE_SOURCES),
         MASSACHUSETTS_SOURCE_ID,
         NEW_HAMPSHIRE_SOURCE_ID,
+        NEW_HAMPSHIRE_DOT_BID_SOURCE_ID,
         VERMONT_SOURCE_ID,
         PENNSYLVANIA_SOURCE_ID,
     }
@@ -97,9 +113,11 @@ def portal_source_ids() -> set[str]:
 def portal_source_coverage() -> dict[str, tuple[tuple[str, ...], str]]:
     return {
         CONNECTICUT_SOURCE_ID: (("CT",), "procurement"),
+        CONNECTICUT_DOT_SOURCE_ID: (("CT",), "dotBidding"),
         RHODE_ISLAND_SOURCE_ID: (("RI",), "dotBidding"),
         MASSACHUSETTS_SOURCE_ID: (("MA",), "procurement"),
         NEW_HAMPSHIRE_SOURCE_ID: (("NH",), "planning"),
+        NEW_HAMPSHIRE_DOT_BID_SOURCE_ID: (("NH",), "dotBidding"),
         VERMONT_SOURCE_ID: (("VT",), "planning"),
         PENNSYLVANIA_SOURCE_ID: (("PA",), "procurement"),
     }
@@ -108,9 +126,11 @@ def portal_source_coverage() -> dict[str, tuple[tuple[str, ...], str]]:
 def portal_warning_prefixes() -> tuple[str, ...]:
     return (
         "CTsource public bid board:",
+        "CTDOT public bid board:",
         "RIDOT public bid board:",
         "Massachusetts DCR construction bids:",
         "NHDOT project service:",
+        "NHDOT advertised bid service:",
         "VTrans project service:",
         "Pennsylvania DGS construction projects:",
     )
@@ -305,7 +325,7 @@ def fetch_webprocure_source(
             "searchableFields": [bid_number, title, description, agency, config.jurisdiction],
             "documentTextIndexed": False,
         }
-        if score_project(project)["score"] < 8:
+        if config.require_product_fit and score_project(project)["score"] < 8:
             continue
         try:
             detail_url = (
@@ -331,7 +351,11 @@ def fetch_webprocure_source(
 
     source = {
         "id": config.source_id,
-        "name": f"{config.jurisdiction} Public Canopy Opportunities",
+        "name": (
+            f"{config.jurisdiction} Public Product Opportunities"
+            if config.require_product_fit
+            else f"{config.jurisdiction} Public Bid Board"
+        ),
         "owner": config.owner,
         "level": "state",
         "sourceClass": "procurement",
@@ -340,7 +364,9 @@ def fetch_webprocure_source(
         "access": "open",
         "cadence": "Daily",
         "recordCount": len(projects),
-        "recordCountUnit": "qualified projects",
+        "recordCountUnit": (
+            "qualified projects" if config.require_product_fit else "projects"
+        ),
         "loadedCount": len(projects),
         "snapshotComplete": complete,
         "lastChecked": checked_at,
@@ -348,7 +374,11 @@ def fetch_webprocure_source(
         "jurisdiction": config.jurisdiction,
         "stateCode": config.state,
         "coverageField": config.coverage_field,
-        "note": "Official state-embedded public bid board, narrowed to canopy-relevant records after retrieving the complete open board.",
+        "note": (
+            "Official state-embedded public bid board, narrowed to canopy, pergola, and partition-wall relevance after retrieving the complete open board."
+            if config.require_product_fit
+            else "Official agency-filtered public bid board containing the complete set of open opportunities published by the transportation department."
+        ),
     }
     return SourceRefreshResult(config.source_id, projects, source), warnings
 
@@ -497,12 +527,16 @@ def fetch_new_hampshire_projects(
             stage = "planning"
         project_url = _clean_text(record.get("PROJECT_INFO"))
         project_host = urlparse(project_url).hostname or ""
-        if not project_url.startswith("https://") or not project_host.endswith("nh.gov"):
+        if not project_url.startswith("https://") or not (
+            project_host == "nh.gov" or project_host.endswith(".nh.gov")
+        ):
             project_url = NEW_HAMPSHIRE_SOURCE_URL
         documents = [_official_document(f"NHDOT project record {record_id}", project_url)]
         plan_url = _clean_text(record.get("PROJECT_PLANS"))
         plan_host = urlparse(plan_url).hostname or ""
-        if plan_url.startswith("https://") and plan_host.endswith("nh.gov"):
+        if plan_url.startswith("https://") and (
+            plan_host == "nh.gov" or plan_host.endswith(".nh.gov")
+        ):
             documents.append(_official_document(f"NHDOT project plans {record_id}", plan_url))
         project: dict[str, Any] = {
             "id": f"{NEW_HAMPSHIRE_SOURCE_ID}:{record_id}",
@@ -542,7 +576,7 @@ def fetch_new_hampshire_projects(
             projects.append(project)
     source = {
         "id": NEW_HAMPSHIRE_SOURCE_ID,
-        "name": "NHDOT Canopy-Relevant Project Pipeline",
+        "name": "NHDOT Product-Relevant Project Pipeline",
         "owner": "New Hampshire Department of Transportation",
         "level": "state",
         "sourceClass": "planning",
@@ -559,9 +593,125 @@ def fetch_new_hampshire_projects(
         "jurisdiction": "New Hampshire",
         "stateCode": "NH",
         "coverageField": "planning",
-        "note": "Official NHDOT current-project service narrowed to canopy-relevant planning through construction records.",
+        "note": "Official NHDOT current-project service narrowed to canopy, pergola, and partition-wall relevance across planning through construction records.",
     }
     return SourceRefreshResult(NEW_HAMPSHIRE_SOURCE_ID, projects, source)
+
+
+def fetch_new_hampshire_bids(
+    fetch_json: Callable[[str], dict[str, Any]] = fetch_public_json,
+    *,
+    today: date | None = None,
+    fetched_at: str | None = None,
+) -> SourceRefreshResult:
+    current_date = today or datetime.now(timezone.utc).date()
+    checked_at = fetched_at or datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    records, complete = _arcgis_features(
+        NEW_HAMPSHIRE_SOURCE_URL,
+        "IS_CURRENT = 'YES' AND INTERNET_DISPLAY = 'YES' AND BID_DATE IS NOT NULL",
+        fetch_json,
+    )
+    projects: list[dict[str, Any]] = []
+    for record in records:
+        bid_date = _iso_from_epoch(record.get("BID_DATE"))
+        if not bid_date or bid_date < current_date.isoformat():
+            continue
+        record_id = _clean_text(record.get("PROJ_NUMBER"))
+        description = _clean_text(record.get("PROJ_DESCRIPTION"))
+        location = _clean_text(record.get("PROJ_NAME"))
+        title = " - ".join(value for value in (location, description) if value)
+        if not record_id or not title:
+            continue
+
+        project_url = _clean_text(record.get("PROJECT_INFO"))
+        project_host = urlparse(project_url).hostname or ""
+        if not project_url.startswith("https://") or not (
+            project_host == "nh.gov" or project_host.endswith(".nh.gov")
+        ):
+            project_url = NEW_HAMPSHIRE_SOURCE_URL
+        documents = [_official_document(f"NHDOT advertised project {record_id}", project_url)]
+        plan_url = _clean_text(record.get("PROJECT_PLANS"))
+        plan_host = urlparse(plan_url).hostname or ""
+        if plan_url.startswith("https://") and (
+            plan_host == "nh.gov" or plan_host.endswith(".nh.gov")
+        ):
+            documents.append(
+                {
+                    "name": f"NHDOT project plans {record_id}",
+                    "kind": "plans",
+                    "url": plan_url,
+                    "access": "public",
+                    "indexStatus": "metadata-only",
+                }
+            )
+
+        projects.append(
+            {
+                "id": f"{NEW_HAMPSHIRE_DOT_BID_SOURCE_ID}:{record_id}",
+                "sourceId": NEW_HAMPSHIRE_DOT_BID_SOURCE_ID,
+                "sourceRecordId": record_id,
+                "title": title,
+                "summary": description or title,
+                "stage": "bidding",
+                "status": "Advertised - bids scheduled",
+                "agency": "New Hampshire Department of Transportation",
+                "city": location,
+                "state": "NH",
+                "postedAt": _iso_from_epoch(record.get("AD_DATE")),
+                "updatedAt": checked_at,
+                "bidDate": bid_date,
+                "bidDateTimeZone": "America/New_York",
+                "sourceName": "NHDOT Advertised Bids",
+                "sourceUrl": project_url,
+                "provenance": "live-public-api",
+                "confidence": "official",
+                "documents": documents,
+                "participants": [
+                    {
+                        "name": _clean_text(record.get("CONTACT_NAME"))
+                        or "NHDOT project contact",
+                        "role": "project contact",
+                        "participantType": "person",
+                        "organization": "New Hampshire Department of Transportation",
+                        "email": "",
+                        "phone": _clean_text(record.get("CONTACT_PHONE")),
+                        "sourceUrl": project_url,
+                    }
+                ],
+                "searchableFields": [
+                    record_id,
+                    title,
+                    description,
+                    location,
+                    "New Hampshire",
+                ],
+                "documentTextIndexed": False,
+            }
+        )
+
+    projects.sort(key=lambda project: (project.get("bidDate") or "", project["sourceRecordId"]))
+    source = {
+        "id": NEW_HAMPSHIRE_DOT_BID_SOURCE_ID,
+        "name": "NHDOT Advertised Bids",
+        "owner": "New Hampshire Department of Transportation",
+        "level": "state",
+        "sourceClass": "procurement",
+        "stages": ["bidding"],
+        "status": "live",
+        "access": "open",
+        "cadence": "Daily",
+        "recordCount": len(projects),
+        "recordCountUnit": "projects",
+        "loadedCount": len(projects),
+        "snapshotComplete": complete,
+        "lastChecked": checked_at,
+        "url": NEW_HAMPSHIRE_SOURCE_URL,
+        "jurisdiction": "New Hampshire",
+        "stateCode": "NH",
+        "coverageField": "dotBidding",
+        "note": "Official NHDOT records with current or future bid dates. Direct plan links are attached when NHDOT publishes them in the project service.",
+    }
+    return SourceRefreshResult(NEW_HAMPSHIRE_DOT_BID_SOURCE_ID, projects, source)
 
 
 def _manager_name(value: Any) -> str:
@@ -680,7 +830,7 @@ def fetch_vermont_projects(
         projects.append(project)
     source = {
         "id": VERMONT_SOURCE_ID,
-        "name": "VTrans Canopy-Relevant Active Project Pipeline",
+        "name": "VTrans Product-Relevant Active Project Pipeline",
         "owner": "Vermont Agency of Transportation",
         "level": "state",
         "sourceClass": "planning",
@@ -697,7 +847,7 @@ def fetch_vermont_projects(
         "jurisdiction": "Vermont",
         "stateCode": "VT",
         "coverageField": "planning",
-        "note": "Official VTrans active-project service narrowed to canopy-relevant records, with published factsheet contacts when available.",
+        "note": "Official VTrans active-project service narrowed to canopy, pergola, and partition-wall relevance, with published factsheet contacts when available.",
     }
     return SourceRefreshResult(VERMONT_SOURCE_ID, projects, source)
 
@@ -813,7 +963,11 @@ def fetch_portal_sources(
 
     for config, label in zip(
         WEBPROCURE_SOURCES,
-        ("CTsource public bid board", "RIDOT public bid board"),
+        (
+            "CTsource public bid board",
+            "CTDOT public bid board",
+            "RIDOT public bid board",
+        ),
         strict=True,
     ):
         try:
@@ -854,6 +1008,10 @@ def fetch_portal_sources(
         results.append(fetch_new_hampshire_projects(fetch_json, today=today, fetched_at=checked_at))
     except Exception as error:
         warnings.append(f"NHDOT project service: {error}")
+    try:
+        results.append(fetch_new_hampshire_bids(fetch_json, today=today, fetched_at=checked_at))
+    except Exception as error:
+        warnings.append(f"NHDOT advertised bid service: {error}")
     try:
         results.append(fetch_vermont_projects(fetch_html, fetch_json, fetched_at=checked_at))
     except Exception as error:

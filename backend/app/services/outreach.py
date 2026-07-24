@@ -4,11 +4,10 @@ from typing import Any
 
 from ..config import settings
 from .ai_outreach import generate_ai_email, tudelu_signature
-from .canopy import score_project
+from .canopy import project_product_matches, score_project
 from .marketing_outreach import (
     default_sales_reply_owner,
-    marketing_persona,
-    marketing_sender,
+    marketing_persona_for,
     sales_reply_owner,
 )
 from .qualification import EMAIL, published_contacts
@@ -22,6 +21,7 @@ def generate_outreach_draft(
     personalize: bool = False,
     recipient: str = "",
     sender_mode: str = "marketing",
+    marketing_sender_email: str = "",
     reply_owner_email: str = "",
 ) -> dict[str, Any]:
     contacts = published_contacts(project)
@@ -36,15 +36,29 @@ def generate_outreach_draft(
         raise ValueError("Recipient must be an email address published with this project")
     reference = str(project.get("sourceRecordId") or project.get("id") or "the project")
     title = str(project.get("title") or "this project").strip()
+    is_prospect = project.get("recordType") == "prospect"
     canopy_fit = score_project(project)
+    product_matches = project_product_matches(project)
+    declared_products = [
+        str(product)
+        for product in project.get("productTypes", [])
+        if product in {"canopies", "pergolas", "partition-walls"}
+    ]
+    primary_product = (
+        declared_products[0]
+        if is_prospect and declared_products
+        else product_matches[0]["id"]
+        if product_matches
+        else "canopies"
+    )
     if sender_mode not in {"marketing", "employee"}:
         raise ValueError("Sender mode must be marketing or employee")
     if sender_mode == "marketing":
-        draft_user = marketing_persona()
+        draft_user = marketing_persona_for(marketing_sender_email)
         reply_owner = sales_reply_owner(reply_owner_email) or default_sales_reply_owner(
             str(user.get("email") or "")
         )
-        sender_email = marketing_sender()
+        sender_email = draft_user["email"]
     else:
         draft_user = user
         reply_owner = {
@@ -54,7 +68,11 @@ def generate_outreach_draft(
         sender_email = reply_owner["email"]
     if personalize:
         generated = generate_ai_email(
-            {**project, "canopyFit": canopy_fit},
+            {
+                **project,
+                "canopyFit": canopy_fit,
+                "productMatches": product_matches,
+            },
             draft_user,
             contact,
             email_history,
@@ -68,20 +86,74 @@ def generate_outreach_draft(
             if value
         )
         location_phrase = f" in {location}" if location else ""
-        body = (
-            f"Hi {greeting_name}, I’m reaching out from Tudelu about {title}{location_phrase}. "
-            "We design and manufacture custom-engineered aluminum architectural canopies, covered walkways, and entrance systems. "
-            "Could you share the current drawings, addenda, and preferred path for a specialty canopy manufacturer to support the project?"
-        )
-        generated = {
-            "subject": f"Canopy support for {reference}",
-            "body": f"{body}\n\n{tudelu_signature(draft_user)}",
-        }
+        product_copy = {
+            "pergolas": {
+                "label": "Pergola",
+                "capability": (
+                    "We design and manufacture custom-engineered aluminum pergolas "
+                    "and outdoor architectural systems."
+                ),
+                "role": "specialty pergola manufacturer",
+            },
+            "partition-walls": {
+                "label": "Partition wall",
+                "capability": (
+                    "We design and manufacture custom-engineered partition systems, "
+                    "including demountable, operable, glass, and acoustic wall solutions."
+                ),
+                "role": "specialty partition-system manufacturer",
+            },
+            "canopies": {
+                "label": "Canopy",
+                "capability": (
+                    "We design and manufacture custom-engineered aluminum architectural "
+                    "canopies, covered walkways, and entrance systems."
+                ),
+                "role": "specialty canopy manufacturer",
+            },
+        }[primary_product]
+        if is_prospect:
+            practice = str(
+                project.get("prospectOrganizationType") or "organization"
+            ).replace("-", " ")
+            scope = {
+                "pergolas": "pergola and outdoor-amenity",
+                "partition-walls": "architectural partition",
+                "canopies": "canopy and entrance-system",
+            }[primary_product]
+            body = (
+                f"Hi {greeting_name}, I’m reaching out from Tudelu because {title}"
+                f"{location_phrase} looks closely aligned with the architectural systems "
+                f"we manufacture in Little Ferry, NJ. {product_copy['capability']} "
+                f"Would you be open to a brief introduction about upcoming {scope} needs, "
+                f"or point me to the right {practice} contact?"
+            )
+            generated = {
+                "subject": f"Tudelu {product_copy['label'].lower()} capabilities for {title}",
+                "body": f"{body}\n\n{tudelu_signature(draft_user)}",
+            }
+        else:
+            body = (
+                f"Hi {greeting_name}, I’m reaching out from Tudelu about {title}{location_phrase}. "
+                f"{product_copy['capability']} "
+                "Could you share the current drawings, addenda, and preferred path for a "
+                f"{product_copy['role']} to support the project?"
+            )
+            generated = {
+                "subject": f"{product_copy['label']} support for {reference}",
+                "body": f"{body}\n\n{tudelu_signature(draft_user)}",
+            }
         generation = {"provider": "template"}
     return {
         "projectId": str(project["id"]),
         "projectTitle": title,
         "sourceRecordId": reference,
+        "recordType": "prospect" if is_prospect else "project",
+        "sourceUrl": str(project.get("sourceUrl") or ""),
+        "productTypes": declared_products,
+        "prospectFitReasons": project.get("prospectFitReasons") or [],
+        "prospectPriorityRank": project.get("prospectPriorityRank"),
+        "prospectOrganizationType": project.get("prospectOrganizationType") or "",
         "to": contact["email"],
         "contactName": contact["name"],
         "subject": generated["subject"],
@@ -92,6 +164,7 @@ def generate_outreach_draft(
         "generation": generation,
         "senderMode": sender_mode,
         "senderEmail": sender_email,
+        "marketingSenderEmail": sender_email if sender_mode == "marketing" else "",
         "replyOwnerEmail": reply_owner["email"],
         "replyOwnerName": reply_owner["name"],
     }

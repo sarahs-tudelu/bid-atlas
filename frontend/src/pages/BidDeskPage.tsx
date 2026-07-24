@@ -7,7 +7,9 @@ import { useToast } from "../components/ToastProvider";
 import { useApi } from "../hooks/useApi";
 import { emailContacts, phoneContacts, telephoneHref } from "../lib/contacts";
 import { describeDeadline, formatDateTime, formatMoney } from "../lib/format";
-import type { Project, ProjectDocument, ProjectParticipant } from "../types";
+import { projectReturnLink } from "../lib/projectNavigation";
+import { explainFitReason, FIT_BAND_LABELS } from "../lib/productFit";
+import type { InboxResponse, Project, ProjectDocument, ProjectParticipant } from "../types";
 
 interface Draft {
   projectId: string;
@@ -53,10 +55,14 @@ function Contact({ participant }: { participant: ProjectParticipant }) {
 export function BidDeskPage() {
   const [params] = useSearchParams();
   const projectId = params.get("project") ?? "";
+  const returnLink = projectReturnLink(params.get("returnTo"));
   const { notify } = useToast();
 
   const projectState = useApi<Project>(
     projectId ? `/api/projects/${encodeURIComponent(projectId)}` : "/api/projects/__none__",
+  );
+  const correspondence = useApi<InboxResponse>(
+    `/api/inbox?projectId=${encodeURIComponent(projectId || "__none__")}&limit=10`,
   );
 
   const [draft, setDraft] = useState<Draft>(() => emptyDraft(projectId));
@@ -96,7 +102,7 @@ export function BidDeskPage() {
       });
       setDraft(response.draft);
       setSavedFingerprint(fingerprint(response.draft));
-      notify("Bid draft saved.");
+      notify("Project notes saved.");
     } catch (error) {
       const message = error instanceof Error ? error.message : "Save failed";
       setSaveError(message);
@@ -134,15 +140,15 @@ export function BidDeskPage() {
     return (
       <main className="route-page page-width">
         <header className="route-heading">
-          <p className="eyebrow">Controlled estimating</p>
-          <h1>Bid desk</h1>
-          <p>Choose an opportunity to build a source-backed scope and internal bid package.</p>
+          <p className="eyebrow">Source-backed review</p>
+          <h1>Project workspace</h1>
+          <p>Choose a project to review its evidence and prepare internal scope notes.</p>
         </header>
         <div className="empty-panel">
           <h2>No project selected</h2>
-          <p>Open an opportunity first, then bring it into the bid desk.</p>
-          <Link className="button button-primary" to="/projects">
-            Browse open bids
+          <p>Open a project lead first, then bring it into the workspace.</p>
+          <Link className="button button-primary" to="/leads">
+            Browse project leads
           </Link>
         </div>
       </main>
@@ -160,7 +166,7 @@ export function BidDeskPage() {
         {project && (
           <>
             <header className="route-heading bid-desk-heading">
-              <p className="eyebrow">Bid desk · {project.sourceRecordId}</p>
+              <p className="eyebrow">Project workspace · {project.sourceRecordId}</p>
               <h1>{project.title}</h1>
               {project.summary && <p>{project.summary}</p>}
               <div className="hero-actions">
@@ -177,8 +183,8 @@ export function BidDeskPage() {
                     Call {phoneContact.phone}
                   </a>
                 ) : null}
-                <Link className="button button-quiet" to="/projects">
-                  Back to bids
+                <Link className="button button-quiet" to={returnLink.to}>
+                  {returnLink.label}
                 </Link>
               </div>
             </header>
@@ -217,6 +223,41 @@ export function BidDeskPage() {
                     <dd>{formatMoney(project.value)}</dd>
                   </div>
                 </dl>
+
+                {project.canopyFit ? (
+                  <>
+                    <h3>Product fit reasoning</h3>
+                    <div className="fit-score-panel">
+                      <div>
+                        <strong>{project.canopyFit.score}</strong>
+                        <span>{FIT_BAND_LABELS[project.canopyFit.band]}</span>
+                      </div>
+                      <p>
+                        Title matches carry more weight than detail matches. Relevant trade classifications raise the
+                        score; conflicting or non-construction signals lower it.
+                      </p>
+                      {project.productMatches?.length ? (
+                        <p>
+                          Matched product {project.productMatches.length === 1 ? "category" : "categories"}:{" "}
+                          <strong>
+                            {project.productMatches
+                              .map((match) => `${match.label} (${match.score})`)
+                              .join(", ")}
+                          </strong>
+                        </p>
+                      ) : null}
+                      {project.canopyFit.reasons.length ? (
+                        <ul>
+                          {project.canopyFit.reasons.map((reason) => (
+                            <li key={reason}>{explainFitReason(reason)}</li>
+                          ))}
+                        </ul>
+                      ) : (
+                        <p>No individual scoring signals were returned.</p>
+                      )}
+                    </div>
+                  </>
+                ) : null}
 
                 <h3>Documents</h3>
                 {project.documents?.length ? (
@@ -298,6 +339,51 @@ export function BidDeskPage() {
                 </div>
               </form>
             </div>
+
+            <section className="project-correspondence-panel">
+              <div className="section-heading">
+                <div>
+                  <p className="eyebrow">GMAIL + FILED DOCUMENTS</p>
+                  <h2>Project correspondence</h2>
+                </div>
+                <Link className="button button-quiet" to={`/inbox?project=${encodeURIComponent(project.id)}`}>
+                  Open project inbox
+                </Link>
+              </div>
+              <AsyncState
+                loading={correspondence.loading}
+                error={correspondence.error}
+                onRetry={correspondence.refetch}
+              >
+                {correspondence.data?.messages.length ? (
+                  <div className="project-mail-list">
+                    {correspondence.data.messages.map((message) => (
+                      <article key={message.messageId}>
+                        <div>
+                          <span className={`direction-badge direction-${message.direction}`}>{message.direction}</span>
+                          <time dateTime={message.occurredAt}>{formatDateTime(message.occurredAt)}</time>
+                        </div>
+                        <div>
+                          <h3>{message.subject}</h3>
+                          <p>{message.direction === "received" ? message.from : `To ${message.to}`}</p>
+                        </div>
+                        <div>
+                          {message.attachments.map((attachment) => (
+                            <a href={attachment.downloadUrl} key={attachment.downloadUrl}>{attachment.name}</a>
+                          ))}
+                          {!message.attachments.length ? <small>No filed attachments</small> : null}
+                        </div>
+                      </article>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="evidence-empty">
+                    No Gmail correspondence is filed for this project yet. Sync the inbox after connecting with the
+                    published GC, architect, or agency contact.
+                  </p>
+                )}
+              </AsyncState>
+            </section>
           </>
         )}
       </AsyncState>

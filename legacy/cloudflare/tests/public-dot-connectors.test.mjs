@@ -60,6 +60,12 @@ test("the public DOT registry exposes stable, official HTTPS sources", () => {
     "michigan-dot-bid-lettings",
     "ohio-dot-filed-construction-projects",
     "pennsylvania-dot-ecms-bid-packages",
+    "massachusetts-dot-advertised-projects",
+    "delaware-dot-open-solicitations",
+    "maryland-sha-contract-advertising-schedule",
+    "south-carolina-dot-construction-lettings",
+    "georgia-dot-construction-letting-calendar",
+    "district-dot-open-solicitations",
   ]);
   for (const sourceId of PUBLIC_DOT_SOURCE_IDS) {
     const template = PUBLIC_DOT_SOURCE_TEMPLATES[sourceId];

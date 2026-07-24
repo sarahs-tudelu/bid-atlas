@@ -77,7 +77,7 @@ def integrations() -> dict[str, Any]:
                 "id": "gmail",
                 "name": "Google Gmail",
                 "configured": oauth_is_configured(),
-                "detail": "Verified Tudelu login, published-contact history, and reviewed sending from the signed-in mailbox.",
+                "detail": "Verified Tudelu login, reviewed sending, project-scoped correspondence sync, and private attachment filing from the signed-in mailbox.",
             },
             {
                 "id": "instantly",
@@ -89,7 +89,7 @@ def integrations() -> dict[str, Any]:
                 "id": "sam",
                 "name": "SAM.gov",
                 "configured": sam_configured,
-                "detail": "Daily federal canopy discovery across all 50 states and D.C. through the official opportunities API.",
+                "detail": "Daily federal canopy, pergola, and partition-wall discovery across all 50 states and D.C. through the official opportunities API.",
             },
             {
                 "id": "anthropic",

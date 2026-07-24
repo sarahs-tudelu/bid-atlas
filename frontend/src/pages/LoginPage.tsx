@@ -17,7 +17,7 @@ export function LoginPage({ error = "" }: { error?: string }) {
         <p className="eyebrow">TUDELU WORKSPACE</p>
         <h1>Sign in to BidAtlas</h1>
         <p>
-          Use your Tudelu Google account to access qualified canopy opportunities, review prior contact,
+          Use your Tudelu Google account to access qualified product opportunities, review prior contact,
           and send approved outreach from your own Gmail mailbox.
         </p>
         {error ? <div className="notice-panel" role="alert">{error}</div> : null}

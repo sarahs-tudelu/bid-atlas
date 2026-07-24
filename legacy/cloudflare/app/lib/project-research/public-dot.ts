@@ -84,6 +84,41 @@ const ALLOWED_HOSTS: Record<PublicDotSourceId, readonly string[]> = {
     "contracts.dot.state.oh.us",
   ],
   "pennsylvania-dot-ecms-bid-packages": ["www.ecms.penndot.pa.gov"],
+  "massachusetts-dot-advertised-projects": [
+    "hwy.massdot.state.ma.us",
+    "mass.gov",
+    "www.mass.gov",
+    "bidx.com",
+    "www.bidx.com",
+  ],
+  "delaware-dot-open-solicitations": [
+    "mmp.delaware.gov",
+    "gssdocs.deldot.delaware.gov",
+    "bidcondocs.delaware.gov",
+  ],
+  "maryland-sha-contract-advertising-schedule": [
+    "roads.maryland.gov",
+    "bidx.com",
+    "www.bidx.com",
+  ],
+  "south-carolina-dot-construction-lettings": [
+    "info2.scdot.org",
+    "scdot.org",
+    "www.scdot.org",
+    "bidx.com",
+    "www.bidx.com",
+  ],
+  "georgia-dot-construction-letting-calendar": [
+    "dot.ga.gov",
+    "www.dot.ga.gov",
+    "bidx.com",
+    "www.bidx.com",
+  ],
+  "district-dot-open-solicitations": [
+    "dtap.ddot.dc.gov",
+    "ocp.dc.gov",
+    "www.ocp.dc.gov",
+  ],
 };
 
 export type PublicDotLookup = (

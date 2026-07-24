@@ -746,8 +746,7 @@ function mapNycApprovedPermit(row: SocrataRow): ProjectRecord {
     postedAt: isoDate(textValue(row, "issued_date") ?? textValue(row, "approved_date")),
     updatedAt:
       isoDate(
-        textValue(row, "dobrundate") ??
-          textValue(row, "issued_date") ??
+        textValue(row, "issued_date") ??
           textValue(row, "approved_date"),
       ) ?? new Date(0).toISOString(),
     sourceName: SOCRATA_CITY_SOURCE_TEMPLATES[sourceId].name,
@@ -1528,7 +1527,9 @@ const DEFINITIONS: Record<SocrataCitySourceId, SocrataCityDefinition> = {
     datasetId: "rbx6-tga4",
     uniqueKey: ":id",
     uniqueKeyOrder: "opaque-source-order",
-    refreshSortKey: "dobrundate",
+    // NYC removed the former `dobrundate` field from this dataset in 2026.
+    // Issued date is the current authoritative lifecycle watermark.
+    refreshSortKey: "issued_date",
     baseWhere:
       "issued_date is not null AND job_filing_number not in ('Permit is no','Permit is not yet issued') AND work_permit not in ('Permit is no','Permit is not yet issued')",
     viewWhere: "permit_status = 'Permit Issued'",
@@ -1556,7 +1557,6 @@ const DEFINITIONS: Record<SocrataCitySourceId, SocrataCityDefinition> = {
       "owner_business_name",
       "permit_status",
       "tracking_number",
-      "dobrundate",
     ],
     map: mapNycApprovedPermit,
   },

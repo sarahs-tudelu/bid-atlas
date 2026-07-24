@@ -6,7 +6,8 @@ from typing import Any
 from .canopy import score_project
 
 
-MINIMUM_CANOPY_SCORE = 8
+MINIMUM_PRODUCT_SCORE = 8
+MINIMUM_CANOPY_SCORE = MINIMUM_PRODUCT_SCORE
 EMAIL = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
 PHONE_ALLOWED = re.compile(
     r"^[+\d()\s./-]*(?:(?:ext\.?|x)\s*\d+)?$",
@@ -69,14 +70,23 @@ def published_phone_contacts(project: dict[str, Any]) -> list[dict[str, str]]:
     return contacts
 
 
+def is_contactable_product_project(
+    project: dict[str, Any],
+    fit: dict[str, Any] | None = None,
+) -> bool:
+    """Apply the visibility gate for actionable Tudelu product opportunities."""
+
+    product_fit = fit or score_project(project)
+    has_published_contact = bool(
+        published_contacts(project) or published_phone_contacts(project)
+    )
+    return int(product_fit["score"]) >= MINIMUM_PRODUCT_SCORE and has_published_contact
+
+
 def is_contactable_canopy_project(
     project: dict[str, Any],
     fit: dict[str, Any] | None = None,
 ) -> bool:
-    """Apply the product-wide visibility gate for actionable Canopy opportunities."""
+    """Backward-compatible name for the product-wide visibility gate."""
 
-    canopy_fit = fit or score_project(project)
-    has_published_contact = bool(
-        published_contacts(project) or published_phone_contacts(project)
-    )
-    return int(canopy_fit["score"]) >= MINIMUM_CANOPY_SCORE and has_published_contact
+    return is_contactable_product_project(project, fit)

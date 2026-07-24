@@ -1,4 +1,4 @@
-import { useSearchParams } from "react-router-dom";
+import { useLocation, useSearchParams } from "react-router-dom";
 
 import { queryString } from "../api/client";
 import { AsyncState } from "../components/AsyncState";
@@ -26,11 +26,13 @@ function valuesFromParams(params: URLSearchParams): ProjectSearchValues {
     state: params.get("state") ?? "all",
     stage: params.get("stage") ?? "all",
     due: params.get("due") ?? "all",
+    product: params.get("product") ?? "all",
     profile: params.get("profile") ?? "all",
   };
 }
 
 export function ProjectResultsPage({ mode }: ProjectResultsPageProps) {
+  const location = useLocation();
   const [params, setParams] = useSearchParams();
   const activeValues = valuesFromParams(params);
   const activeSignature = JSON.stringify(activeValues);
@@ -88,10 +90,10 @@ export function ProjectResultsPage({ mode }: ProjectResultsPageProps) {
       </header>
 
       {presetData?.presets.length ? (
-        <section className="preset-strip" aria-label="Canopy search profiles">
+        <section className="preset-strip" aria-label="Product opportunity profiles">
           <div>
-            <strong>Canopy opportunity profiles</strong>
-            <span>Reusable searches tuned for Tudelu's architectural canopy work.</span>
+            <strong>Product opportunity profiles</strong>
+            <span>Reusable searches tuned for Tudelu's canopy, pergola, and partition-wall work.</span>
           </div>
           <div className="preset-list">
             {presetData.presets.map((preset) => (
@@ -151,7 +153,13 @@ export function ProjectResultsPage({ mode }: ProjectResultsPageProps) {
             </div>
             {data.projects.length ? (
               <div className={refreshing ? "project-grid is-refreshing" : "project-grid"}>
-                {data.projects.map((project) => <ProjectCard key={project.id} project={project} />)}
+                {data.projects.map((project) => (
+                  <ProjectCard
+                    key={project.id}
+                    project={project}
+                    returnTo={`${location.pathname}${location.search}`}
+                  />
+                ))}
               </div>
             ) : (
               <div className="empty-panel">

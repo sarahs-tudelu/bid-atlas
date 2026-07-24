@@ -8,6 +8,7 @@ export interface ProjectSearchValues {
   state: string;
   stage: string;
   due: string;
+  product: string;
   profile: string;
 }
 
@@ -17,6 +18,7 @@ export const EMPTY_SEARCH: ProjectSearchValues = {
   state: "all",
   stage: "all",
   due: "all",
+  product: "all",
   profile: "all",
 };
 
@@ -38,6 +40,13 @@ export const DUE_LABELS: Record<string, string> = {
   today: "Due today",
   "7-days": "Next 7 days",
   "14-days": "Next 14 days",
+};
+
+export const PRODUCT_LABELS: Record<string, string> = {
+  all: "All product types",
+  canopies: "Canopies",
+  pergolas: "Pergolas",
+  "partition-walls": "Partition walls",
 };
 
 function valuesEqual(left: ProjectSearchValues, right: ProjectSearchValues): boolean {
@@ -76,8 +85,18 @@ export function ProjectSearch({ initialValues, showStage = false, onSubmit, onRe
           type="search"
           value={values.keywords}
           onChange={(event) => set({ keywords: event.target.value })}
-          placeholder="roofing, canopy, glazing"
+          placeholder="canopy, pergola, partition wall"
         />
+      </label>
+      <label>
+        <span>Product type</span>
+        <select value={values.product} onChange={(event) => set({ product: event.target.value })}>
+          {Object.entries(PRODUCT_LABELS).map(([value, label]) => (
+            <option key={value} value={value}>
+              {label}
+            </option>
+          ))}
+        </select>
       </label>
       <label>
         <span>Location</span>

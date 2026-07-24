@@ -9,6 +9,7 @@ from ..services.marketing_outreach import (
     auto_reply_reason,
     forward_marketing_reply,
     list_received_marketing_emails,
+    marketing_sender,
     marketing_reply_key,
     reply_matches_route,
 )
@@ -31,11 +32,11 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         raise RuntimeError("BIDATLAS_WORKSPACE_TABLE is required")
 
     store = WorkspaceStore(settings.workspace_table)
-    routes = {
-        str(route.get("recipient") or "").strip().lower(): route
+    routes = [
+        route
         for route in store.list_prefix(MARKETING_OWNER, "route#")
         if route.get("recipient")
-    }
+    ]
     if not routes:
         return {
             "status": "ok",
@@ -46,11 +47,24 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             "message": "No BidAtlas marketing routes have been sent yet",
         }
 
-    items, complete = list_received_marketing_emails(
-        since=datetime.now(timezone.utc) - timedelta(days=30)
-    )
+    routes_by_sender: dict[str, dict[str, dict[str, Any]]] = {}
+    for route in routes:
+        sender_email = str(route.get("senderEmail") or marketing_sender()).strip().lower()
+        recipient = str(route.get("recipient") or "").strip().lower()
+        routes_by_sender.setdefault(sender_email, {})[recipient] = route
+
+    provider_items: list[tuple[str, dict[str, Any]]] = []
+    complete = True
+    for sender_email in routes_by_sender:
+        items, sender_complete = list_received_marketing_emails(
+            since=datetime.now(timezone.utc) - timedelta(days=30),
+            sender_email=sender_email,
+        )
+        provider_items.extend((sender_email, item) for item in items)
+        complete = complete and sender_complete
+
     checked = forwarded = suppressed = unmatched = failed = 0
-    for item in items:
+    for sender_email, item in provider_items:
         provider_id = str(item.get("id") or "").strip()
         if not provider_id:
             continue
@@ -63,7 +77,7 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         recipient = str(
             item.get("from_address_email") or item.get("lead") or ""
         ).strip().lower()
-        route = routes.get(recipient)
+        route = routes_by_sender[sender_email].get(recipient)
         if not route or not reply_matches_route(item, route):
             unmatched += 1
             continue
@@ -81,6 +95,7 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             "snippet": _reply_snippet(item),
             "projectId": route.get("projectId"),
             "projectTitle": route.get("projectTitle"),
+            "senderEmail": sender_email,
             "replyOwnerEmail": route.get("replyOwnerEmail"),
         }
         reason = auto_reply_reason(item)
@@ -97,6 +112,7 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             result = forward_marketing_reply(
                 item,
                 sales_email=str(route["replyOwnerEmail"]),
+                sender_email=sender_email,
             )
             store.put(
                 MARKETING_OWNER,

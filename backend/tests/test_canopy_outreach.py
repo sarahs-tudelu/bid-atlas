@@ -7,12 +7,18 @@ import backend.app.api.outreach as outreach_api
 from backend.app.api.auth import require_user
 from backend.app.dependencies import get_catalog, get_workspace_store
 from backend.app.main import app
-from backend.app.services.canopy import score_project, score_text
+from backend.app.services.canopy import (
+    project_product_matches,
+    score_project,
+    score_text,
+)
+from backend.app.services.catalog import ProjectCatalog, SearchFilters
 from backend.app.services.marketing_outreach import (
     MARKETING_OWNER,
     marketing_route_key,
     marketing_sender,
 )
+from backend.app.services.outreach import generate_outreach_draft
 from backend.app.services.qualification import (
     is_contactable_canopy_project,
     published_contacts,
@@ -43,6 +49,7 @@ def _fake_generated_draft(
     personalize: bool = False,
     recipient: str = "",
     sender_mode: str = "marketing",
+    marketing_sender_email: str = "",
     reply_owner_email: str = "",
 ) -> dict:
     contacts = published_contacts(project)
@@ -64,7 +71,16 @@ def _fake_generated_draft(
             else {"provider": "template"}
         ),
         "senderMode": sender_mode,
-        "senderEmail": marketing_sender() if sender_mode == "marketing" else user["email"],
+        "senderEmail": (
+            marketing_sender_email or marketing_sender()
+            if sender_mode == "marketing"
+            else user["email"]
+        ),
+        "marketingSenderEmail": (
+            marketing_sender_email or marketing_sender()
+            if sender_mode == "marketing"
+            else ""
+        ),
         "replyOwnerEmail": (
             reply_owner_email
             if sender_mode == "marketing" and reply_owner_email
@@ -78,12 +94,185 @@ def test_canopy_scoring_prioritizes_relevant_construction_language() -> None:
     assert score_text("Architectural metal canopy replacement", "construction", "332311")[0] >= 20
     assert score_text("Covered walkway improvements", "public building construction")[0] >= 12
     assert score_text("Main entrance renovation", "exterior building work")[0] >= 12
+    assert score_text("New rooftop pergola", "commercial construction")[0] >= 20
+    assert score_text("Interior partition wall replacement", "office renovation")[0] >= 20
 
 
 def test_canopy_scoring_rejects_false_positive_canopies() -> None:
     assert score_text("Urban tree canopy assessment", "forest habitat mapping")[0] < 0
     assert score_text("Aircraft cockpit canopy parts", "replacement NSN parts")[0] < 0
     assert score_text("100Amp service entrance replacement", "electrical work")[0] < 6
+    assert score_text("Database partition maintenance", "table partition algorithm")[0] < 0
+
+
+def test_product_classification_keeps_canopies_pergolas_and_partition_walls_distinct() -> None:
+    canopy = project_product_matches({"title": "Entrance canopy replacement"})
+    pergola = project_product_matches({"title": "New rooftop pergola"})
+    partitions = project_product_matches(
+        {"title": "Demountable interior partition installation"}
+    )
+
+    assert [match["id"] for match in canopy] == ["canopies"]
+    assert [match["id"] for match in pergola] == ["pergolas"]
+    assert [match["id"] for match in partitions] == ["partition-walls"]
+
+
+def test_catalog_product_filter_returns_only_the_requested_product() -> None:
+    projects = []
+    for index, title in enumerate(
+        (
+            "Architectural canopy replacement",
+            "Courtyard pergola installation",
+            "Demountable partition wall renovation",
+        ),
+        start=1,
+    ):
+        projects.append(
+            {
+                "id": f"test:{index}",
+                "sourceId": "test",
+                "sourceRecordId": str(index),
+                "title": title,
+                "summary": "Commercial building construction",
+                "stage": "design",
+                "state": "NJ",
+                "sourceUrl": "https://example.gov/project",
+                "documents": [],
+                "participants": [{"phone": "973-555-0100"}],
+            }
+        )
+    catalog = ProjectCatalog.from_snapshot(
+        {
+            "generatedAt": "2026-07-23T12:00:00Z",
+            "projects": projects,
+            "sources": [],
+            "coverage": {"states": [{"code": "NJ", "name": "New Jersey"}]},
+            "inventory": {},
+        },
+        {"sources": []},
+    )
+
+    response = catalog.search(
+        SearchFilters(
+            product="partition-walls",
+            include_archived=True,
+            limit=10,
+        )
+    )
+
+    assert [project["title"] for project in response["projects"]] == [
+        "Demountable partition wall renovation"
+    ]
+    assert response["projects"][0]["productTypes"] == ["partition-walls"]
+
+
+def test_search_prioritizes_projects_with_public_drawings() -> None:
+    base = {
+        "sourceId": "test",
+        "title": "Architectural canopy replacement",
+        "summary": "Commercial building construction",
+        "stage": "bidding",
+        "state": "NJ",
+        "bidDate": "2026-12-01",
+        "sourceUrl": "https://example.gov/project",
+        "participants": [{"phone": "973-555-0100"}],
+    }
+    catalog = ProjectCatalog.from_snapshot(
+        {
+            "generatedAt": "2026-07-23T12:00:00Z",
+            "projects": [
+                {
+                    **base,
+                    "id": "test:no-drawings",
+                    "sourceRecordId": "no-drawings",
+                    "updatedAt": "2026-07-23T12:00:00Z",
+                    "documents": [
+                        {
+                            "name": "Project page",
+                            "kind": "source-record",
+                            "url": "https://example.gov/project",
+                            "access": "public",
+                        }
+                    ],
+                },
+                {
+                    **base,
+                    "id": "test:drawings",
+                    "sourceRecordId": "drawings",
+                    "updatedAt": "2026-07-01T12:00:00Z",
+                    "documents": [
+                        {
+                            "name": "Architectural plans",
+                            "kind": "plans",
+                            "url": "https://example.gov/plans.pdf",
+                            "access": "public",
+                        }
+                    ],
+                },
+                {
+                    **base,
+                    "id": "test:account-gated-drawings",
+                    "sourceRecordId": "account-gated-drawings",
+                    "updatedAt": "2026-07-24T12:00:00Z",
+                    "documents": [
+                        {
+                            "name": "Signed-in plan room",
+                            "kind": "plans",
+                            "url": "https://example.gov/account/plans",
+                            "access": "free-account",
+                        }
+                    ],
+                },
+            ],
+            "sources": [],
+            "coverage": {"states": [{"code": "NJ", "name": "New Jersey"}]},
+            "inventory": {},
+        },
+        {"sources": []},
+    )
+
+    response = catalog.search(SearchFilters(include_archived=True, limit=10))
+
+    assert [project["id"] for project in response["projects"]] == [
+        "test:drawings",
+        "test:account-gated-drawings",
+        "test:no-drawings",
+    ]
+    assert response["projects"][0]["hasAccessibleDrawings"] is True
+    assert response["projects"][0]["accessibleDrawingCount"] == 1
+    assert response["projects"][1]["hasAccessibleDrawings"] is False
+    assert catalog.dashboard()["projects"][0]["id"] == "test:drawings"
+    documents = catalog.documents()["documents"]
+    assert documents[0]["projectId"] == "test:drawings"
+    assert documents[0]["isAccessibleDrawing"] is True
+    assert next(
+        document
+        for document in documents
+        if document["projectId"] == "test:account-gated-drawings"
+    )["isAccessibleDrawing"] is False
+
+
+def test_default_outreach_template_uses_the_matching_product_family() -> None:
+    project = {
+        "id": "test:partition",
+        "sourceRecordId": "PART-100",
+        "title": "Demountable partition wall renovation",
+        "state": "NJ",
+        "participants": [
+            {"name": "Pat Buyer", "email": "pat.buyer@example.gov"}
+        ],
+    }
+
+    draft = generate_outreach_draft(
+        project,
+        TEST_USER,
+        [],
+        sender_mode="employee",
+    )
+
+    assert draft["subject"] == "Partition wall support for PART-100"
+    assert "partition systems" in draft["body"]
+    assert "specialty canopy manufacturer" not in draft["body"]
 
 
 def test_phone_only_project_is_contactable_without_becoming_emailable() -> None:
@@ -106,6 +295,7 @@ def test_search_presets_and_profile_results_include_fit_evidence() -> None:
     )
     assert len(national["states"]) == 51
     assert "DC" in national["states"]
+    assert any(item["id"] == "partition_walls" for item in presets.json()["presets"])
 
     response = client.get(
         "/api/search",
@@ -122,6 +312,33 @@ def test_search_presets_and_profile_results_include_fit_evidence() -> None:
 
 def test_outreach_config_defaults_to_marketing_and_limits_reply_owners(monkeypatch) -> None:
     monkeypatch.setattr(outreach_api, "instantly_is_configured", lambda: True)
+    monkeypatch.setattr(
+        outreach_api,
+        "available_marketing_accounts",
+        lambda: (
+            [
+                {
+                    "email": "outreach@tudelugroup.com",
+                    "name": "Alex Turner",
+                    "status": "active",
+                    "statusCode": 1,
+                    "warmupStatus": 1,
+                    "providerCode": 3,
+                    "setupPending": False,
+                },
+                {
+                    "email": "sarah@gettudelu.com",
+                    "name": "Sarah",
+                    "status": "active",
+                    "statusCode": 1,
+                    "warmupStatus": 1,
+                    "providerCode": 1,
+                    "setupPending": False,
+                },
+            ],
+            "",
+        ),
+    )
 
     response = client.get("/api/outreach/config")
 
@@ -134,6 +351,10 @@ def test_outreach_config_defaults_to_marketing_and_limits_reply_owners(monkeypat
         "name": "Alex Turner",
     }
     assert config["employee"]["email"] == TEST_USER["email"]
+    assert [account["email"] for account in config["marketingAccounts"]] == [
+        "outreach@tudelugroup.com",
+        "sarah@gettudelu.com",
+    ]
     assert config["defaultReplyOwnerEmail"] == "jessica@tudelu.com"
     assert {owner["email"] for owner in config["salesReplyOwners"]} == {
         "jadalyn.gaines@tudelu.com",

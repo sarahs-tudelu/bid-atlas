@@ -16,11 +16,21 @@ from .state import WorkspaceStore
 
 
 INSTANTLY_API_BASE = "https://api.instantly.ai/api/v2"
+INSTANTLY_USER_AGENT = "BidAtlas/1.0"
 MARKETING_OWNER = "system#marketing-outreach"
 MARKETING_PERSONA = {"name": "Alex", "email": "outreach@tudelugroup.com"}
 MARKETING_COOLDOWN_DAYS = 14
 MAX_PROVIDER_BYTES = 2_000_000
 MAX_REPLY_PAGES = 5
+MAX_ACCOUNT_PAGES = 5
+ACCOUNT_STATUS_LABELS = {
+    1: "active",
+    2: "paused",
+    3: "maintenance",
+    -1: "connection-error",
+    -2: "soft-bounce-error",
+    -3: "sending-error",
+}
 
 # These owners come from the cold-outreach handoff policy. The sender persona is
 # deliberately separate from the employee who owns the sales response.
@@ -40,6 +50,10 @@ class InstantlyApiError(RuntimeError):
 
 def marketing_sender() -> str:
     return settings.marketing_sender or MARKETING_PERSONA["email"]
+
+
+def _normalized_sender(sender_email: str = "") -> str:
+    return sender_email.strip().lower() or marketing_sender()
 
 
 def instantly_api_token() -> str:
@@ -90,6 +104,7 @@ def _provider_request(
         headers={
             "Accept": "application/json",
             "Authorization": f"Bearer {instantly_api_token()}",
+            "User-Agent": INSTANTLY_USER_AGENT,
             **({"Content-Type": "application/json"} if body is not None else {}),
         },
     )
@@ -108,6 +123,122 @@ def _provider_request(
         raise InstantlyApiError("Instantly request could not be completed") from error
 
 
+def list_marketing_accounts() -> list[dict[str, Any]]:
+    """Return every sender account visible to the configured Instantly token."""
+
+    accounts: list[dict[str, Any]] = []
+    starting_after = ""
+    for _ in range(MAX_ACCOUNT_PAGES):
+        query = {"limit": "100"}
+        if starting_after:
+            query["starting_after"] = starting_after
+        response = _provider_request(f"/accounts?{urlencode(query)}")
+        items = response.get("items")
+        if not isinstance(items, list):
+            raise InstantlyApiError("Instantly account response did not contain an item list")
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            email = str(item.get("email") or "").strip().lower()
+            if not email:
+                continue
+            first_name = str(item.get("first_name") or "").strip()
+            last_name = str(item.get("last_name") or "").strip()
+            name = " ".join(part for part in (first_name, last_name) if part)
+            status_code = int(item.get("status") or 0)
+            accounts.append(
+                {
+                    "email": email,
+                    "name": name or email,
+                    "status": ACCOUNT_STATUS_LABELS.get(status_code, "unknown"),
+                    "statusCode": status_code,
+                    "warmupStatus": int(item.get("warmup_status") or 0),
+                    "providerCode": int(item.get("provider_code") or 0),
+                    "setupPending": bool(item.get("setup_pending")),
+                }
+            )
+        starting_after = str(response.get("next_starting_after") or "")
+        if not starting_after:
+            break
+    else:
+        raise InstantlyApiError("Instantly account list exceeded the page limit")
+
+    default_sender = marketing_sender()
+    deduplicated = {account["email"]: account for account in accounts}
+    return sorted(
+        deduplicated.values(),
+        key=lambda account: (
+            account["email"] != default_sender,
+            account["statusCode"] != 1,
+            account["name"].casefold(),
+            account["email"],
+        ),
+    )
+
+
+def available_marketing_accounts() -> tuple[list[dict[str, Any]], str]:
+    """Return provider accounts with a safe default fallback during provider outages."""
+
+    try:
+        accounts = list_marketing_accounts()
+        if accounts:
+            return accounts, ""
+        warning = "Instantly returned no sender accounts; using the configured default"
+    except (InstantlyApiError, RuntimeError) as error:
+        warning = str(error)
+    return (
+        [
+            {
+                "email": marketing_sender(),
+                "name": "Alex Turner",
+                "status": "configured",
+                "statusCode": 0,
+                "warmupStatus": 0,
+                "providerCode": 0,
+                "setupPending": False,
+            }
+        ],
+        warning,
+    )
+
+
+def marketing_account(sender_email: str = "") -> dict[str, Any]:
+    """Resolve a client-selected sender against provider-authorized accounts."""
+
+    normalized = _normalized_sender(sender_email)
+    if normalized == marketing_sender():
+        return {
+            "email": marketing_sender(),
+            "name": "Alex Turner",
+            "status": "configured",
+            "statusCode": 0,
+            "warmupStatus": 0,
+            "providerCode": 0,
+            "setupPending": False,
+        }
+    try:
+        account = next(
+            (
+                candidate
+                for candidate in list_marketing_accounts()
+                if candidate["email"] == normalized
+            ),
+            None,
+        )
+    except (InstantlyApiError, RuntimeError):
+        raise
+    if account is None:
+        raise InstantlyApiError("Selected marketing sender is not available to BidAtlas")
+    return account
+
+
+def marketing_persona_for(sender_email: str = "") -> dict[str, str]:
+    account = marketing_account(sender_email)
+    if account["email"] == marketing_sender():
+        return {**MARKETING_PERSONA, "email": account["email"]}
+    return {"name": str(account["name"]), "email": str(account["email"])}
+
+
 def _plain_text_html(value: str) -> str:
     return (
         '<div style="font-family:Arial,Helvetica,sans-serif;font-size:15px;'
@@ -116,12 +247,19 @@ def _plain_text_html(value: str) -> str:
     )
 
 
-def send_marketing_email(*, recipient: str, subject: str, body: str) -> dict[str, str]:
+def send_marketing_email(
+    *,
+    recipient: str,
+    subject: str,
+    body: str,
+    sender_email: str = "",
+) -> dict[str, str]:
+    sender = marketing_account(sender_email)["email"]
     response = _provider_request(
         "/emails/test",
         method="POST",
         payload={
-            "eaccount": marketing_sender(),
+            "eaccount": sender,
             "to_address_email_list": recipient,
             "subject": subject,
             "body": {"html": _plain_text_html(body), "text": body},
@@ -129,13 +267,15 @@ def send_marketing_email(*, recipient: str, subject: str, body: str) -> dict[str
     )
     if response.get("status") != "success" and response.get("success") is not True:
         raise InstantlyApiError("Instantly did not confirm marketing email delivery")
-    return {"provider": "instantly:test-email", "sender": marketing_sender()}
+    return {"provider": "instantly:test-email", "sender": sender}
 
 
 def list_received_marketing_emails(
     *,
     since: datetime,
+    sender_email: str = "",
 ) -> tuple[list[dict[str, Any]], bool]:
+    sender = _normalized_sender(sender_email)
     items: list[dict[str, Any]] = []
     starting_after = ""
     complete = True
@@ -145,7 +285,7 @@ def list_received_marketing_emails(
             "email_type": "received",
             "mode": "emode_all",
             "preview_only": "false",
-            "eaccount": marketing_sender(),
+            "eaccount": sender,
             "min_timestamp_created": since.astimezone(timezone.utc).isoformat(),
         }
         if starting_after:
@@ -167,7 +307,9 @@ def forward_marketing_reply(
     item: dict[str, Any],
     *,
     sales_email: str,
+    sender_email: str = "",
 ) -> dict[str, str]:
+    sender_account = _normalized_sender(sender_email)
     reply_id = str(item.get("id") or "").strip()
     if not reply_id:
         raise InstantlyApiError("Instantly reply is missing its email id")
@@ -177,7 +319,7 @@ def forward_marketing_reply(
         "/emails/forward",
         method="POST",
         payload={
-            "eaccount": marketing_sender(),
+            "eaccount": sender_account,
             "reply_to_uuid": reply_id,
             "to_address_email_list": sales_email,
             "reply_to": sender,
@@ -241,7 +383,9 @@ def record_marketing_route(
     sent_by: str,
     reply_owner_email: str,
     sent_at: str,
+    sender_email: str = "",
 ) -> dict[str, Any]:
+    sender = _normalized_sender(sender_email)
     return store.put(
         MARKETING_OWNER,
         marketing_route_key(recipient),
@@ -251,7 +395,7 @@ def record_marketing_route(
             "projectId": project_id,
             "projectTitle": project_title,
             "sentBy": sent_by,
-            "senderEmail": marketing_sender(),
+            "senderEmail": sender,
             "replyOwnerEmail": reply_owner_email,
             "sentAt": sent_at,
         },
@@ -317,7 +461,7 @@ def marketing_reply_history(store: WorkspaceStore, recipient: str) -> list[dict[
                 {
                     "id": str(record.get("providerId") or "reply"),
                     "from": normalized,
-                    "to": marketing_sender(),
+                    "to": str(record.get("senderEmail") or marketing_sender()),
                     "subject": str(record.get("subject") or ""),
                     "date": str(record.get("occurredAt") or ""),
                     "snippet": str(record.get("snippet") or record.get("status") or "")[:240],

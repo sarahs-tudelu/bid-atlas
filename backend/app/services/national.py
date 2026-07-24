@@ -20,11 +20,21 @@ from .northeast import (
     northeast_warning_prefixes,
     sam_source_id,
 )
+from .public_procurement import (
+    DC_PASS_SOURCE_ID,
+    NYC_CROL_SOURCE_ID,
+    fetch_dc_pass_projects,
+    fetch_nyc_crol_projects,
+    fetch_nyc_open_data_json,
+    fetch_open_data_json,
+)
 from .source_refresh import SourceRefreshResult, SourceResult
 
 
 def configured_source_ids(sam_enabled: bool) -> set[str]:
     source_ids = configured_regional_source_ids(False)
+    source_ids.add(DC_PASS_SOURCE_ID)
+    source_ids.add(NYC_CROL_SOURCE_ID)
     if sam_enabled:
         source_ids.update(sam_source_id(state) for state in US_STATES_AND_DC)
     return source_ids
@@ -34,6 +44,8 @@ def national_source_coverage(
     sam_enabled: bool,
 ) -> dict[str, tuple[tuple[str, ...], str]]:
     coverage = northeast_source_coverage(False)
+    coverage[DC_PASS_SOURCE_ID] = (("DC",), "procurement")
+    coverage[NYC_CROL_SOURCE_ID] = (("NY",), "procurement")
     if sam_enabled:
         coverage.update(
             {
@@ -45,7 +57,11 @@ def national_source_coverage(
 
 
 def national_warning_prefixes() -> tuple[str, ...]:
-    return northeast_warning_prefixes()
+    return (
+        *northeast_warning_prefixes(),
+        "District of Columbia PASS solicitations:",
+        "New York City Record solicitations:",
+    )
 
 
 def fetch_nationwide_sam_partitions(
@@ -97,7 +113,7 @@ def fetch_nationwide_sam_partitions(
             failed_queries += 1
             warnings.append(f"SAM.gov national: {query!r} query failed: {error}")
 
-    # Treat the seven-query batch transactionally. A provider failure retains
+    # Treat the keyword batch transactionally. A provider failure retains
     # every prior state partition instead of replacing them with partial data.
     if failed_queries:
         warnings.append(
@@ -134,7 +150,7 @@ def fetch_nationwide_sam_partitions(
                 projects,
                 {
                     "id": sam_source_id(state),
-                    "name": f"SAM.gov Canopy Opportunities - {state}",
+                    "name": f"SAM.gov Product Opportunities - {state}",
                     "owner": "U.S. General Services Administration",
                     "level": "federal",
                     "sourceClass": "procurement",
@@ -153,8 +169,8 @@ def fetch_nationwide_sam_partitions(
                     "coverageField": "federalProcurement",
                     "note": (
                         "Official SAM.gov active opportunities grouped by place of performance "
-                        "after a rate-efficient national keyword query. This is federal, not "
-                        "statewide procurement coverage."
+                        "after rate-efficient national canopy, pergola, and partition-wall "
+                        "keyword queries. This is federal, not statewide procurement coverage."
                     ),
                 },
             )
@@ -167,6 +183,10 @@ def fetch_national_sources(
     sam_api_key: str = "",
     fetch_html: Callable[[str], str] = fetch_official_html,
     fetch_json: Callable[[str], dict[str, Any]] = fetch_sam_json,
+    fetch_open_json: Callable[[str], dict[str, Any]] = fetch_open_data_json,
+    fetch_nyc_json: Callable[
+        [str], list[dict[str, Any]]
+    ] = fetch_nyc_open_data_json,
     today: date | None = None,
     fetched_at: str | None = None,
 ) -> tuple[list[SourceResult], list[str]]:
@@ -180,6 +200,35 @@ def fetch_national_sources(
         today=today,
         fetched_at=checked_at,
     )
+
+    try:
+        dc_result, dc_warnings = fetch_dc_pass_projects(
+            fetch_open_json,
+            today=today,
+            fetched_at=checked_at,
+        )
+        results.append(dc_result)
+        warnings.extend(
+            f"District of Columbia PASS solicitations: {warning}"
+            for warning in dc_warnings
+        )
+    except Exception as error:
+        warnings.append(f"District of Columbia PASS solicitations: {error}")
+
+    try:
+        nyc_result, nyc_warnings = fetch_nyc_crol_projects(
+            fetch_nyc_json,
+            today=today,
+            fetched_at=checked_at,
+        )
+        results.append(nyc_result)
+        warnings.extend(
+            f"New York City Record solicitations: {warning}"
+            for warning in nyc_warnings
+        )
+    except Exception as error:
+        warnings.append(f"New York City Record solicitations: {error}")
+
     if not sam_api_key:
         return results, warnings
 

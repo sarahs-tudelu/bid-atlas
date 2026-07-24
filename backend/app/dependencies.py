@@ -3,6 +3,7 @@ from functools import lru_cache
 from .config import settings
 from .services.catalog import JurisdictionCatalog, ProjectCatalog
 from .services.catalog_provider import ProjectCatalogProvider
+from .services.partner_directory import PartnerDirectory
 from .services.state import WorkspaceStore
 
 
@@ -23,6 +24,16 @@ def get_catalog() -> ProjectCatalog:
 @lru_cache(maxsize=1)
 def get_jurisdictions() -> JurisdictionCatalog:
     return JurisdictionCatalog(settings.data_directory / "all_50_us_states_and_cities_2025.txt")
+
+
+@lru_cache(maxsize=1)
+def get_partner_directory() -> PartnerDirectory:
+    return PartnerDirectory(
+        [
+            settings.data_directory / "new-jersey-partner-directory.json",
+            settings.data_directory / "tri-state-research-prospects.json",
+        ]
+    )
 
 
 @lru_cache(maxsize=1)

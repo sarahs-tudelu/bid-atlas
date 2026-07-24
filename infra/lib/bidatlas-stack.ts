@@ -9,6 +9,7 @@ import * as events from "aws-cdk-lib/aws-events";
 import * as targets from "aws-cdk-lib/aws-events-targets";
 import * as iam from "aws-cdk-lib/aws-iam";
 import * as lambda from "aws-cdk-lib/aws-lambda";
+import * as nodejs from "aws-cdk-lib/aws-lambda-nodejs";
 import * as logs from "aws-cdk-lib/aws-logs";
 import * as s3 from "aws-cdk-lib/aws-s3";
 import * as deployments from "aws-cdk-lib/aws-s3-deployment";
@@ -243,6 +244,45 @@ export class BidAtlasStack extends cdk.Stack {
       ],
     });
 
+    const publicSourceRefreshFunction = new nodejs.NodejsFunction(this, "PublicSourceRefreshFunction", {
+      runtime: lambda.Runtime.NODEJS_22_X,
+      architecture: lambda.Architecture.X86_64,
+      entry: path.join(repositoryRoot, "infra", "handlers", "legacy-source-refresh.ts"),
+      handler: "handler",
+      memorySize: 2048,
+      timeout: cdk.Duration.minutes(15),
+      depsLockFilePath: path.join(repositoryRoot, "package-lock.json"),
+      projectRoot: repositoryRoot,
+      bundling: {
+        minify: true,
+        sourceMap: true,
+        externalModules: ["@aws-sdk/*"],
+      },
+      logGroup: new logs.LogGroup(this, "PublicSourceRefreshLogGroup", {
+        retention: logs.RetentionDays.ONE_WEEK,
+        removalPolicy: cdk.RemovalPolicy.DESTROY,
+      }),
+      environment: {
+        BIDATLAS_CATALOG_BUCKET: catalogBucket.bucketName,
+        BIDATLAS_CATALOG_KEY: "current-projects.json",
+      },
+    });
+    publicSourceRefreshFunction.addToRolePolicy(new iam.PolicyStatement({
+      actions: ["s3:GetObject", "s3:PutObject"],
+      resources: [catalogBucket.arnForObjects("current-projects.json")],
+    }));
+    publicSourceRefreshFunction.node.addDependency(catalogDeployment);
+
+    new events.Rule(this, "DailyPublicSourceRefresh", {
+      description: "Refresh the public state, local, permit, planning, and DOT connector library daily.",
+      schedule: events.Schedule.cron({ minute: "45", hour: "9" }),
+      targets: [
+        new targets.LambdaFunction(publicSourceRefreshFunction, {
+          retryAttempts: 2,
+        }),
+      ],
+    });
+
     let marketingReplySyncFunction: lambda.Function | undefined;
     if (instantlyApiTokenParameterName) {
       marketingReplySyncFunction = new lambda.Function(this, "MarketingReplySyncFunction", {
@@ -310,6 +350,85 @@ export class BidAtlasStack extends cdk.Stack {
         description: "Forward BidAtlas marketing-mailbox replies to their assigned Tudelu sales owners.",
         schedule: events.Schedule.rate(cdk.Duration.minutes(5)),
         targets: [new targets.LambdaFunction(marketingReplySyncFunction, { retryAttempts: 2 })],
+      });
+    }
+
+    let gmailInboxSyncFunction: lambda.Function | undefined;
+    if (googleClientIdParameterName && googleClientSecretParameterName) {
+      gmailInboxSyncFunction = new lambda.Function(this, "GmailInboxSyncFunction", {
+        runtime: lambda.Runtime.PYTHON_3_12,
+        architecture: lambda.Architecture.X86_64,
+        handler: "app.jobs.sync_gmail_inboxes.handler",
+        memorySize: 1024,
+        timeout: cdk.Duration.minutes(5),
+        logGroup: new logs.LogGroup(this, "GmailInboxSyncLogGroup", {
+          retention: logs.RetentionDays.ONE_WEEK,
+          removalPolicy: cdk.RemovalPolicy.DESTROY,
+        }),
+        code: lambda.Code.fromAsset(repositoryRoot, {
+          exclude: [
+            ".git",
+            ".openai",
+            ".vinext",
+            ".wrangler",
+            "node_modules",
+            "frontend",
+            "infra",
+            "legacy",
+            "sam_dot_gov-main",
+            "tudelu-cold-outreach-main",
+            "public",
+            "data",
+            "docs",
+            "outputs",
+            "work",
+            ".env*",
+            "*.md",
+            "package*.json",
+          ],
+          bundling: {
+            image: lambda.Runtime.PYTHON_3_12.bundlingImage,
+            command: [
+              "bash",
+              "-c",
+              [
+                "pip install -r backend/requirements.txt -t /asset-output",
+                "cp -r backend/app /asset-output/app",
+                "cp -r data-export /asset-output/data-export",
+              ].join(" && "),
+            ],
+          },
+        }),
+        environment: {
+          BIDATLAS_ENVIRONMENT: "production",
+          BIDATLAS_DATA_DIR: "/var/task/data-export",
+          BIDATLAS_CATALOG_BUCKET: catalogBucket.bucketName,
+          BIDATLAS_CATALOG_KEY: "current-projects.json",
+          BIDATLAS_CATALOG_REFRESH_SECONDS: "0",
+          BIDATLAS_WORKSPACE_TABLE: workspaceTable.tableName,
+          BIDATLAS_DOCUMENTS_BUCKET: documentsBucket.bucketName,
+          BIDATLAS_GOOGLE_CLIENT_ID_PARAMETER: googleClientIdParameterName,
+          BIDATLAS_GOOGLE_CLIENT_SECRET_PARAMETER: googleClientSecretParameterName,
+        },
+      });
+      workspaceTable.grantReadWriteData(gmailInboxSyncFunction);
+      documentsBucket.grantPut(gmailInboxSyncFunction);
+      catalogBucket.grantRead(gmailInboxSyncFunction);
+      gmailInboxSyncFunction.node.addDependency(catalogDeployment);
+      gmailInboxSyncFunction.addToRolePolicy(new iam.PolicyStatement({
+        actions: ["ssm:GetParameter"],
+        resources: [googleClientIdParameterName, googleClientSecretParameterName].map((name) =>
+          cdk.Stack.of(this).formatArn({
+            service: "ssm",
+            resource: "parameter",
+            resourceName: name.replace(/^\/+/, ""),
+          })
+        ),
+      }));
+      new events.Rule(this, "GmailInboxSyncSchedule", {
+        description: "File employee Gmail correspondence and attachments into matching BidAtlas projects.",
+        schedule: events.Schedule.rate(cdk.Duration.minutes(5)),
+        targets: [new targets.LambdaFunction(gmailInboxSyncFunction, { retryAttempts: 2 })],
       });
     }
 
@@ -411,9 +530,17 @@ function handler(event) {
     new cdk.CfnOutput(this, "NationalRefreshFunctionName", {
       value: nationalRefreshFunction.functionName,
     });
+    new cdk.CfnOutput(this, "PublicSourceRefreshFunctionName", {
+      value: publicSourceRefreshFunction.functionName,
+    });
     if (marketingReplySyncFunction) {
       new cdk.CfnOutput(this, "MarketingReplySyncFunctionName", {
         value: marketingReplySyncFunction.functionName,
+      });
+    }
+    if (gmailInboxSyncFunction) {
+      new cdk.CfnOutput(this, "GmailInboxSyncFunctionName", {
+        value: gmailInboxSyncFunction.functionName,
       });
     }
   }

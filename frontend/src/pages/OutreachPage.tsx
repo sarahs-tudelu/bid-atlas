@@ -6,7 +6,14 @@ import { AsyncState } from "../components/AsyncState";
 import { useApi } from "../hooks/useApi";
 import { useAuth } from "../hooks/useAuth";
 import { emailContacts } from "../lib/contacts";
-import type { OutreachConfig, OutreachDraft, Project, SearchResponse } from "../types";
+import type {
+  OutreachConfig,
+  OutreachDraft,
+  PartnerDirectoryResponse,
+  PartnerOrganization,
+  Project,
+  SearchResponse,
+} from "../types";
 
 interface DraftResponse {
   draft: OutreachDraft;
@@ -25,6 +32,9 @@ export function OutreachPage() {
     profile: "direct_national",
     readiness: "all",
     includeArchived: false,
+    limit: 100,
+  })}`);
+  const prospects = useApi<PartnerDirectoryResponse>(`/api/partner-directory${queryString({
     limit: 100,
   })}`);
   const history = useApi<HistoryResponse>("/api/outreach/history");
@@ -67,10 +77,20 @@ export function OutreachPage() {
     () => candidates.data?.projects.find((project) => project.id === projectId),
     [candidates.data, projectId],
   );
+  const selectedProspect = useMemo(() => {
+    if (!projectId.startsWith("prospect:")) return undefined;
+    const organizationId = projectId.slice("prospect:".length);
+    return prospects.data?.organizations.find((organization) => organization.id === organizationId);
+  }, [projectId, prospects.data]);
   const emailCandidates = useMemo(
     () => candidates.data?.projects.filter((project) => emailContacts(project).length > 0) ?? [],
     [candidates.data],
   );
+  const emailProspects = useMemo(
+    () => prospects.data?.organizations.filter((organization) => Boolean(organization.email)) ?? [],
+    [prospects.data],
+  );
+  const sourceUrl = draft?.sourceUrl || selectedProject?.sourceUrl || selectedProspect?.sourceUrl;
 
   const save = async (): Promise<void> => {
     if (!draft || draft.status === "sent") return;
@@ -136,6 +156,7 @@ export function OutreachPage() {
           personalize: true,
           to: draft?.to ?? "",
           senderMode: draft?.senderMode ?? "marketing",
+          marketingSenderEmail: draft?.marketingSenderEmail ?? draft?.senderEmail ?? "",
           replyOwnerEmail: draft?.replyOwnerEmail ?? "",
         }),
       });
@@ -148,8 +169,21 @@ export function OutreachPage() {
     }
   };
 
-  const changeSenderMode = async (senderMode: "marketing" | "employee"): Promise<void> => {
-    if (!projectId || draft?.status === "sent" || senderMode === draft?.senderMode) return;
+  const changeSender = async (
+    senderMode: "marketing" | "employee",
+    marketingSenderEmail = "",
+  ): Promise<void> => {
+    if (
+      !projectId
+      || draft?.status === "sent"
+      || (
+        senderMode === draft?.senderMode
+        && (
+          senderMode === "employee"
+          || marketingSenderEmail === (draft?.marketingSenderEmail ?? draft?.senderEmail)
+        )
+      )
+    ) return;
     setSaveStatus("Updating sender identity…");
     try {
       const response = await apiRequest<DraftResponse>("/api/outreach/generate", {
@@ -158,6 +192,7 @@ export function OutreachPage() {
           projectId,
           regenerate: true,
           senderMode,
+          marketingSenderEmail,
           to: draft?.to ?? "",
           replyOwnerEmail: draft?.replyOwnerEmail ?? outreachConfig.data?.defaultReplyOwnerEmail ?? "",
         }),
@@ -174,14 +209,14 @@ export function OutreachPage() {
     <main className="route-page page-width">
       <header className="route-heading outreach-heading">
         <p className="eyebrow">MARKETING + GMAIL OUTREACH</p>
-        <h1>Send from Tudelu marketing, with an employee-mailbox option.</h1>
+        <h1>Choose the right Tudelu sender for each reviewed message.</h1>
         <p>
-          Marketing outreach defaults to Alex at Tudelu and routes responses to the selected sales owner. Employees can switch to their own Gmail account. Every message still requires review and confirmation.
+          Select any authorized marketing mailbox and route responses to the responsible sales owner, or send from your own connected Gmail account. Every message still requires review and confirmation.
         </p>
       </header>
 
       <label className="outreach-project-picker">
-        <span>Contactable canopy opportunity</span>
+        <span>Contactable bid or research prospect</span>
         <select
           value={projectId}
           onChange={(event) => {
@@ -189,14 +224,24 @@ export function OutreachPage() {
             if (event.target.value) next.set("project", event.target.value);
             setParams(next);
           }}
-          disabled={candidates.loading}
+          disabled={candidates.loading || prospects.loading}
         >
-          <option value="">Choose a qualified project</option>
-          {emailCandidates.map((project: Project) => (
-            <option key={project.id} value={project.id}>
-              {project.state ?? "US"} · Fit {project.canopyFit?.score ?? 0} · {project.title}
-            </option>
-          ))}
+          <option value="">Choose a bid or prospect</option>
+          <optgroup label="Qualified bids">
+            {emailCandidates.map((project: Project) => (
+              <option key={project.id} value={project.id}>
+                {project.state ?? "US"} · Fit {project.canopyFit?.score ?? 0} · {project.title}
+              </option>
+            ))}
+          </optgroup>
+          <optgroup label="Research prospects">
+            {emailProspects.map((organization: PartnerOrganization) => (
+              <option key={organization.id} value={`prospect:${organization.id}`}>
+                {organization.priorityRank ? `Priority ${organization.priorityRank} · ` : ""}
+                {organization.state} · {organization.name}
+              </option>
+            ))}
+          </optgroup>
         </select>
       </label>
 
@@ -206,13 +251,35 @@ export function OutreachPage() {
       {draft && !draftLoading ? (
         <section className="outreach-layout">
           <aside className="outreach-context">
-            <p className="eyebrow">WHY THIS PROJECT</p>
-            <h2>{draft.projectTitle}</h2>
-            <p className={`fit-callout fit-${draft.canopyFit.band}`}>
-              Canopy fit <strong>{draft.canopyFit.score}</strong>
+            <p className="eyebrow">
+              {draft.recordType === "prospect" ? "WHY THIS PROSPECT" : "WHY THIS PROJECT"}
             </p>
-            <ul>{draft.canopyFit.reasons.map((reason) => <li key={reason}>{reason}</li>)}</ul>
-            {selectedProject ? <a href={selectedProject.sourceUrl} target="_blank" rel="noreferrer">Verify official source ↗</a> : null}
+            <h2>{draft.projectTitle}</h2>
+            {draft.recordType === "prospect" ? (
+              <>
+                <p className="fit-callout prospect-fit-callout">
+                  {draft.prospectPriorityRank ? `Research priority #${draft.prospectPriorityRank}` : "Research-qualified"}
+                </p>
+                <div className="partner-scope-list" aria-label="Relevant product scopes">
+                  {(draft.productTypes ?? []).map((product) => (
+                    <span key={product}>
+                      {product === "partition-walls" ? "Partition walls" : product[0].toUpperCase() + product.slice(1)}
+                    </span>
+                  ))}
+                </div>
+                <ul>
+                  {(draft.prospectFitReasons ?? []).map((reason) => <li key={reason}>{reason}</li>)}
+                </ul>
+              </>
+            ) : (
+              <>
+                <p className={`fit-callout fit-${draft.canopyFit.band}`}>
+                  Product fit <strong>{draft.canopyFit.score}</strong>
+                </p>
+                <ul>{draft.canopyFit.reasons.map((reason) => <li key={reason}>{reason}</li>)}</ul>
+              </>
+            )}
+            {sourceUrl ? <a href={sourceUrl} target="_blank" rel="noreferrer">Verify published source ↗</a> : null}
             <p className="field-hint">Sender: <strong>{draft.senderEmail}</strong></p>
             <p className="field-hint">Reply owner: <strong>{draft.replyOwnerEmail}</strong></p>
           </aside>
@@ -232,15 +299,38 @@ export function OutreachPage() {
               <label>
                 <span>Send from</span>
                 <select
-                  value={draft.senderMode}
+                  value={
+                    draft.senderMode === "employee"
+                      ? "employee"
+                      : `marketing:${draft.marketingSenderEmail ?? draft.senderEmail}`
+                  }
                   disabled={draft.status === "sent"}
-                  onChange={(event) => void changeSenderMode(event.target.value as "marketing" | "employee")}
+                  onChange={(event) => {
+                    if (event.target.value === "employee") {
+                      void changeSender("employee");
+                      return;
+                    }
+                    void changeSender("marketing", event.target.value.slice("marketing:".length));
+                  }}
                 >
-                  <option value="marketing">
-                    Alex Turner · {outreachConfig.data?.marketing.email ?? draft.senderEmail}
-                  </option>
+                  {(outreachConfig.data?.marketingAccounts ?? [{
+                    email: outreachConfig.data?.marketing.email ?? draft.senderEmail,
+                    name: outreachConfig.data?.marketing.name ?? "Tudelu marketing",
+                    status: "configured",
+                    statusCode: 0,
+                    warmupStatus: 0,
+                    providerCode: 0,
+                    setupPending: false,
+                  }]).map((account) => (
+                    <option key={account.email} value={`marketing:${account.email}`}>
+                      {account.name} · {account.email}{account.status === "active" || account.status === "configured" ? "" : ` · ${account.status}`}
+                    </option>
+                  ))}
                   <option value="employee">My Tudelu Gmail · {user?.email}</option>
                 </select>
+                {outreachConfig.data?.marketingAccountsWarning ? (
+                  <small className="field-hint">{outreachConfig.data.marketingAccountsWarning}</small>
+                ) : null}
               </label>
               {draft.senderMode === "marketing" ? (
                 <label>
@@ -306,7 +396,7 @@ export function OutreachPage() {
                     </div>
                   ))}
                 </article>
-              )) : <p className="evidence-empty">No prior messages with the published project contacts were found.</p>}
+              )) : <p className="evidence-empty">No prior messages with this published contact were found.</p>}
               <small>Only headers and short snippets are retained with the draft; full inbox bodies are not stored.</small>
             </section>
           </div>
@@ -315,9 +405,12 @@ export function OutreachPage() {
 
       {!projectId && !draftLoading ? (
         <div className="empty-panel">
-          <h2>Choose a contactable canopy opportunity</h2>
-          <p>Every visible project has a published email or phone number and meets the Canopy fit threshold.</p>
-          <Link className="button button-primary" to="/projects?profile=direct_national">Find nationwide canopy work</Link>
+          <h2>Choose a contactable bid or research prospect</h2>
+          <p>Bid contacts come from public project records. Prospect contacts come from the source-backed tri-state research directory.</p>
+          <div className="hero-actions">
+            <Link className="button button-primary" to="/projects?profile=direct_national">Find nationwide product work</Link>
+            <Link className="button button-quiet" to="/companies?view=directory">Browse tri-state prospects</Link>
+          </div>
         </div>
       ) : null}
 

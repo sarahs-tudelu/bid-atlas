@@ -1,4 +1,4 @@
-import { DUE_LABELS, STAGE_LABELS, type ProjectSearchValues } from "./ProjectSearch";
+import { DUE_LABELS, PRODUCT_LABELS, STAGE_LABELS, type ProjectSearchValues } from "./ProjectSearch";
 import { stateName } from "../lib/usStates";
 
 const FIELD_LABELS: Record<keyof ProjectSearchValues, string> = {
@@ -7,7 +7,8 @@ const FIELD_LABELS: Record<keyof ProjectSearchValues, string> = {
   state: "State",
   stage: "Stage",
   due: "Deadline",
-  profile: "Canopy profile",
+  product: "Product",
+  profile: "Opportunity profile",
 };
 
 interface FilterChipsProps {
@@ -24,6 +25,7 @@ export function FilterChips({ values, hidden = [], presetLabels = {}, onRemove }
     if (field === "state") return `${value.toUpperCase()} — ${stateName(value)}`;
     if (field === "stage") return STAGE_LABELS[value] ?? value;
     if (field === "due") return DUE_LABELS[value] ?? value;
+    if (field === "product") return PRODUCT_LABELS[value] ?? value;
     if (field === "profile") return presetLabels[value] ?? value;
     return value;
   };

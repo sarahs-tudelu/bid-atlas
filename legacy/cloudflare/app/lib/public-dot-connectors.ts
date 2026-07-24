@@ -24,6 +24,12 @@ import {
   TEXAS_DOT_SOURCE_ID,
   TEXAS_DOT_SOURCE_TEMPLATE,
 } from "./texas-dot-connector.ts";
+import {
+  EAST_COAST_DOT_SOURCE_IDS,
+  EAST_COAST_DOT_SOURCE_TEMPLATES,
+  fetchEastCoastDotSource,
+} from "./east-coast-dot-connectors.ts";
+import type { EastCoastDotSourceId } from "./east-coast-dot-connectors.ts";
 
 const DEFAULT_TIMEOUT_MS = 12_000;
 const MAX_DOT_BINARY_BYTES = 25 * 1024 * 1024;
@@ -112,6 +118,7 @@ export const PUBLIC_DOT_SOURCE_IDS = [
   "michigan-dot-bid-lettings",
   OHIO_DOT_SOURCE_ID,
   PENNSYLVANIA_DOT_SOURCE_ID,
+  ...EAST_COAST_DOT_SOURCE_IDS,
 ] as const;
 
 export type PublicDotSourceId = (typeof PUBLIC_DOT_SOURCE_IDS)[number];
@@ -137,6 +144,7 @@ export interface PublicDotRequestDependencies {
 
 export interface PublicDotFeedOptions extends PublicDotRequestDependencies {
   mode?: PublicDotFeedMode;
+  lane?: "backfill" | "refresh";
   sourceCursors?: Record<string, SourceCursorRecord>;
   /** Optional registry ID to use for emitted records. */
   sourceId?: string;
@@ -340,6 +348,7 @@ export const PUBLIC_DOT_SOURCE_TEMPLATES: Record<
   },
   [OHIO_DOT_SOURCE_ID]: OHIO_DOT_SOURCE_TEMPLATE,
   [PENNSYLVANIA_DOT_SOURCE_ID]: PENNSYLVANIA_DOT_SOURCE_TEMPLATE,
+  ...EAST_COAST_DOT_SOURCE_TEMPLATES,
 };
 
 const SOURCE_DEFINITIONS: Record<PublicDotSourceId, SourceDefinition> = {
@@ -430,6 +439,83 @@ const SOURCE_DEFINITIONS: Record<PublicDotSourceId, SourceDefinition> = {
   [PENNSYLVANIA_DOT_SOURCE_ID]: {
     template: PENNSYLVANIA_DOT_SOURCE_TEMPLATE,
     allowedHosts: ["www.ecms.penndot.pa.gov"],
+    timeZone: "America/New_York",
+  },
+  "massachusetts-dot-advertised-projects": {
+    template:
+      EAST_COAST_DOT_SOURCE_TEMPLATES[
+        "massachusetts-dot-advertised-projects"
+      ],
+    allowedHosts: [
+      "hwy.massdot.state.ma.us",
+      "mass.gov",
+      "www.mass.gov",
+      "bidx.com",
+      "www.bidx.com",
+    ],
+    timeZone: "America/New_York",
+  },
+  "delaware-dot-open-solicitations": {
+    template:
+      EAST_COAST_DOT_SOURCE_TEMPLATES[
+        "delaware-dot-open-solicitations"
+      ],
+    allowedHosts: [
+      "mmp.delaware.gov",
+      "gssdocs.deldot.delaware.gov",
+      "bidcondocs.delaware.gov",
+    ],
+    timeZone: "America/New_York",
+  },
+  "maryland-sha-contract-advertising-schedule": {
+    template:
+      EAST_COAST_DOT_SOURCE_TEMPLATES[
+        "maryland-sha-contract-advertising-schedule"
+      ],
+    allowedHosts: [
+      "roads.maryland.gov",
+      "bidx.com",
+      "www.bidx.com",
+    ],
+    timeZone: "America/New_York",
+  },
+  "south-carolina-dot-construction-lettings": {
+    template:
+      EAST_COAST_DOT_SOURCE_TEMPLATES[
+        "south-carolina-dot-construction-lettings"
+      ],
+    allowedHosts: [
+      "info2.scdot.org",
+      "scdot.org",
+      "www.scdot.org",
+      "bidx.com",
+      "www.bidx.com",
+    ],
+    timeZone: "America/New_York",
+  },
+  "georgia-dot-construction-letting-calendar": {
+    template:
+      EAST_COAST_DOT_SOURCE_TEMPLATES[
+        "georgia-dot-construction-letting-calendar"
+      ],
+    allowedHosts: [
+      "dot.ga.gov",
+      "www.dot.ga.gov",
+      "bidx.com",
+      "www.bidx.com",
+    ],
+    timeZone: "America/New_York",
+  },
+  "district-dot-open-solicitations": {
+    template:
+      EAST_COAST_DOT_SOURCE_TEMPLATES[
+        "district-dot-open-solicitations"
+      ],
+    allowedHosts: [
+      "dtap.ddot.dc.gov",
+      "ocp.dc.gov",
+      "www.ocp.dc.gov",
+    ],
     timeZone: "America/New_York",
   },
 };
@@ -1590,7 +1676,11 @@ function fdotRowDocuments(
   definition: SourceDefinition,
   recordId: string,
 ): ProjectDocument[] {
-  const documents = anchors(rowHtml, sourceUrl, definition.allowedHosts)
+  const documents: ProjectDocument[] = anchors(
+    rowHtml,
+    sourceUrl,
+    definition.allowedHosts,
+  )
     .filter((anchor) => isDirectDocumentUrl(anchor.url))
     .map((anchor) => {
       const filename = decodeURIComponent(
@@ -2461,6 +2551,14 @@ function fetchPublicDotSourceUncached(
   options: PublicDotFeedOptions,
 ): Promise<PublicDotConnectorResult> {
   const outputSourceId = options.sourceId ?? sourceId;
+  if (
+    (EAST_COAST_DOT_SOURCE_IDS as readonly string[]).includes(sourceId)
+  ) {
+    return fetchEastCoastDotSource(sourceId as EastCoastDotSourceId, {
+      ...options,
+      sourceId: outputSourceId,
+    });
+  }
   switch (sourceId) {
     case "washington-dot-contracting-opportunities":
       return fetchWsdot(outputSourceId, options);
@@ -2484,6 +2582,10 @@ function fetchPublicDotSourceUncached(
       return fetchOhioDotSource({ ...options, sourceId: outputSourceId });
     case PENNSYLVANIA_DOT_SOURCE_ID:
       return fetchPennsylvaniaDotSource(outputSourceId, options);
+    default:
+      return Promise.reject(
+        new Error(`Unknown public DOT source: ${sourceId}`),
+      );
   }
 }
 

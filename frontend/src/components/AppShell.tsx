@@ -7,13 +7,14 @@ import { useAuth } from "../hooks/useAuth";
 const primaryLinks = [
   ["/projects", "Open bids"],
   ["/leads", "Leads"],
+  ["/inbox", "Inbox"],
   ["/companies", "Companies"],
   ["/documents", "Documents"],
   ["/coverage", "Coverage"],
 ] as const;
 
 const secondaryLinks = [
-  ["/bid-desk", "Bid desk"],
+  ["/bid-desk", "Workspace"],
   ["/outreach", "Outreach"],
   ["/source-monitor", "Source monitor"],
   ["/integrations", "Integrations"],
@@ -93,7 +94,7 @@ export function AppShell() {
             Sign out
           </button>
           <NavLink className="workspace-link" to="/bid-desk">
-            Bid desk
+            Workspace
           </NavLink>
           <button
             className="icon-button"

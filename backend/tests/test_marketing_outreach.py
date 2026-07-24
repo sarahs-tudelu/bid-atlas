@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from io import BytesIO
 from types import SimpleNamespace
 
 from backend.app.jobs import sync_marketing_replies as reply_job
@@ -89,6 +90,94 @@ def test_marketing_send_uses_designated_instantly_account(monkeypatch) -> None:
     assert requests[0][2]["to_address_email_list"] == "pat@example.gov"
 
 
+def test_marketing_send_accepts_another_provider_authorized_account(monkeypatch) -> None:
+    requests: list[tuple[str, str, dict | None]] = []
+
+    def provider_request(path, *, method="GET", payload=None):
+        requests.append((path, method, payload))
+        if path.startswith("/accounts?"):
+            return {
+                "items": [
+                    {
+                        "email": "sarah@gettudelu.com",
+                        "first_name": "Sarah",
+                        "last_name": "",
+                        "status": 1,
+                        "warmup_status": 1,
+                        "provider_code": 1,
+                        "setup_pending": False,
+                    }
+                ]
+            }
+        return {"status": "success"}
+
+    monkeypatch.setattr(marketing_outreach, "_provider_request", provider_request)
+
+    result = marketing_outreach.send_marketing_email(
+        recipient="pat@example.gov",
+        subject="Canopy support",
+        body="Hello",
+        sender_email="sarah@gettudelu.com",
+    )
+
+    assert result["sender"] == "sarah@gettudelu.com"
+    assert requests[-1][0] == "/emails/test"
+    assert requests[-1][2]["eaccount"] == "sarah@gettudelu.com"
+
+
+def test_marketing_account_list_exposes_status_without_provider_secrets(monkeypatch) -> None:
+    monkeypatch.setattr(
+        marketing_outreach,
+        "_provider_request",
+        lambda *args, **kwargs: {
+            "items": [
+                {
+                    "email": "outreach@tudelupro.com",
+                    "first_name": "Jordan",
+                    "last_name": "Blake",
+                    "status": 2,
+                    "warmup_status": 0,
+                    "provider_code": 3,
+                    "setup_pending": False,
+                }
+            ]
+        },
+    )
+
+    accounts = marketing_outreach.list_marketing_accounts()
+
+    assert accounts == [
+        {
+            "email": "outreach@tudelupro.com",
+            "name": "Jordan Blake",
+            "status": "paused",
+            "statusCode": 2,
+            "warmupStatus": 0,
+            "providerCode": 3,
+            "setupPending": False,
+        }
+    ]
+
+
+def test_instantly_request_identifies_bidatlas_to_provider(monkeypatch) -> None:
+    captured = {}
+
+    def fake_urlopen(request, *, timeout):
+        captured["request"] = request
+        captured["timeout"] = timeout
+        return BytesIO(b'{"items":[]}')
+
+    monkeypatch.setattr(marketing_outreach, "instantly_api_token", lambda: "token")
+    monkeypatch.setattr(marketing_outreach, "urlopen", fake_urlopen)
+
+    response = marketing_outreach._provider_request("/emails?limit=1")
+
+    assert response == {"items": []}
+    assert captured["timeout"] == 20
+    assert captured["request"].get_header("User-agent") == "BidAtlas/1.0"
+    assert captured["request"].get_header("Authorization") == "Bearer token"
+
+
 def test_marketing_route_enforces_reference_cooldown() -> None:
     store = WorkspaceStore(None)
     _route(store)
@@ -117,7 +206,7 @@ def test_reply_sync_forwards_human_response_to_assigned_sales_owner(monkeypatch)
         lambda **kwargs: ([_reply()], True),
     )
 
-    def forward(item, *, sales_email):
+    def forward(item, *, sales_email, sender_email=""):
         forwarded.append(sales_email)
         return {"provider": "instantly:forward", "messageId": "forward-1"}
 

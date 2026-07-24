@@ -139,7 +139,7 @@ export function CoveragePage() {
                         </th>
                         <th scope="col">Procurement</th>
                         <th scope="col">DOT bids</th>
-                        <th scope="col">Federal canopy</th>
+                        <th scope="col">Federal products</th>
                         <th scope="col">Permits</th>
                         <th scope="col">Planning</th>
                       </tr>

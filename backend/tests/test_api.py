@@ -1,6 +1,7 @@
 from fastapi.testclient import TestClient
 
 from backend.app.api.auth import require_user
+from backend.app.dependencies import get_workspace_store
 from backend.app.main import app
 from backend.app.services.qualification import is_contactable_canopy_project
 
@@ -71,3 +72,68 @@ def test_workspace_draft_round_trip() -> None:
     loaded = client.get("/api/bid-drafts", params={"projectId": "example:1"})
     assert loaded.status_code == 200
     assert loaded.json()["draft"]["notes"] == "Confirm addendum."
+
+
+def test_inbox_is_owner_scoped_and_manual_assignment_uses_qualified_project() -> None:
+    project = client.get("/api/search", params={"readiness": "all", "limit": 10}).json()["projects"][0]
+    store = get_workspace_store()
+    store.put(
+        TEST_USER["email"],
+        "correspondence#api-message-1",
+        {
+            "messageId": "api-message-1",
+            "threadId": "api-thread-1",
+            "projectId": "",
+            "projectTitle": "",
+            "sourceRecordId": "",
+            "candidateProjectIds": [project["id"]],
+            "matchedBy": "needs-review",
+            "matchConfidence": "unassigned",
+            "subject": "Project documents",
+            "from": "architect@example.com",
+            "to": TEST_USER["email"],
+            "cc": "",
+            "occurredAt": "2026-07-23T12:00:00+00:00",
+            "direction": "received",
+            "snippet": "The drawing is attached.",
+            "attachments": [
+                {
+                    "name": "drawing.pdf",
+                    "mimeType": "application/pdf",
+                    "size": 1024,
+                    "status": "filed",
+                    "key": "gmail/private/api-message-1/drawing.pdf",
+                }
+            ],
+            "hasAttachments": True,
+            "attachmentWarnings": [],
+        },
+    )
+    response = client.get(
+        "/api/inbox",
+        params={"status": "unassigned", "limit": 25},
+    )
+    assert response.status_code == 200
+    message = next(
+        item for item in response.json()["messages"] if item["messageId"] == "api-message-1"
+    )
+    assert "key" not in message["attachments"][0]
+    assert message["attachments"][0]["downloadUrl"].endswith("/api-message-1/0")
+
+    assigned = client.put(
+        "/api/inbox/messages/api-message-1/project",
+        json={"projectId": project["id"]},
+    )
+    assert assigned.status_code == 200
+    assert assigned.json()["message"]["projectId"] == project["id"]
+    assert assigned.json()["message"]["matchedBy"] == "manual"
+
+    project_view = client.get(
+        "/api/inbox",
+        params={"projectId": project["id"], "limit": 10},
+    )
+    assert project_view.status_code == 200
+    assert any(
+        item["messageId"] == "api-message-1"
+        for item in project_view.json()["messages"]
+    )

@@ -10,6 +10,10 @@ from backend.app.services.geography import (
 from backend.app.services import national
 from backend.app.services.national import national_source_coverage
 from backend.app.services.northeast import SAM_QUERIES, sam_source_id
+from backend.app.services.public_procurement import (
+    DC_PASS_SOURCE_ID,
+    NYC_CROL_SOURCE_ID,
+)
 from backend.app.services.source_refresh import SourceRefreshResult, merge_source_snapshot
 
 
@@ -20,7 +24,7 @@ def _sam_result(state: str, checked_at: str) -> SourceRefreshResult:
         [],
         {
             "id": source_id,
-            "name": f"SAM.gov Canopy Opportunities - {state}",
+            "name": f"SAM.gov Product Opportunities - {state}",
             "status": "live",
             "lastChecked": checked_at,
             "stateCode": state,
@@ -75,6 +79,8 @@ def test_national_fetch_queries_once_then_isolates_all_state_partitions(monkeypa
     results, warnings = national.fetch_national_sources(
         sam_api_key="configured",
         fetch_json=fetch_json,
+        fetch_open_json=lambda url: {"features": [], "exceededTransferLimit": False},
+        fetch_nyc_json=lambda url: [],
         today=date(2026, 7, 22),
         fetched_at="2026-07-22T12:00:00Z",
     )
@@ -84,7 +90,7 @@ def test_national_fetch_queries_once_then_isolates_all_state_partitions(monkeypa
     assert len(visited_queries) == len(SAM_QUERIES)
     assert {result.source_id for result in results} == {
         sam_source_id(state) for state in US_STATES_AND_DC
-    }
+    } | {DC_PASS_SOURCE_ID, NYC_CROL_SOURCE_ID}
 
 
 def test_national_sam_batch_retains_all_partitions_when_one_query_fails(monkeypatch) -> None:
@@ -99,11 +105,16 @@ def test_national_sam_batch_retains_all_partitions_when_one_query_fails(monkeypa
     results, warnings = national.fetch_national_sources(
         sam_api_key="configured",
         fetch_json=fetch_json,
+        fetch_open_json=lambda url: {"features": [], "exceededTransferLimit": False},
+        fetch_nyc_json=lambda url: [],
         today=date(2026, 7, 22),
         fetched_at="2026-07-22T12:00:00Z",
     )
 
-    assert results == []
+    assert [result.source_id for result in results] == [
+        DC_PASS_SOURCE_ID,
+        NYC_CROL_SOURCE_ID,
+    ]
     assert any("retained all prior state partitions" in warning for warning in warnings)
 
 

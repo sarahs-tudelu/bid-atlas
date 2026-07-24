@@ -1,4 +1,4 @@
-import { Link, useSearchParams } from "react-router-dom";
+import { Link, useLocation, useSearchParams } from "react-router-dom";
 
 import { queryString } from "../api/client";
 import { AsyncState } from "../components/AsyncState";
@@ -6,6 +6,7 @@ import { Pagination } from "../components/Pagination";
 import { QuerySearchForm } from "../components/QuerySearchForm";
 import { ListSkeleton } from "../components/Skeleton";
 import { useApi } from "../hooks/useApi";
+import { projectWorkspaceHref } from "../lib/projectNavigation";
 import type { DocumentRecord, PageMeta } from "../types";
 
 interface DocumentsResponse {
@@ -14,6 +15,7 @@ interface DocumentsResponse {
 }
 
 export function DocumentsPage() {
+  const location = useLocation();
   const [params, setParams] = useSearchParams();
   const activeQuery = params.get("q") ?? "";
   const projectId = params.get("project") ?? "";
@@ -81,6 +83,7 @@ export function DocumentsPage() {
                         <span className={`due-badge ${document.access === "free-account" ? "due-soon" : ""}`}>
                           {document.access === "free-account" ? "Account required" : "Public access"}
                         </span>
+                        {document.isAccessibleDrawing && <span className="drawing-badge">Drawing ready</span>}
                         {document.indexStatus === "indexed" && <span className="due-badge">Text indexed</span>}
                       </div>
                       <h2>{document.name}</h2>
@@ -90,7 +93,9 @@ export function DocumentsPage() {
                       <a className="button button-primary" href={document.url} target="_blank" rel="noreferrer">
                         Open official route ↗
                       </a>
-                      <Link to={`/bid-desk?project=${encodeURIComponent(document.projectId)}`}>Project workspace</Link>
+                      <Link to={projectWorkspaceHref(document.projectId, `${location.pathname}${location.search}`)}>
+                        Project workspace
+                      </Link>
                     </div>
                   </article>
                 ))}

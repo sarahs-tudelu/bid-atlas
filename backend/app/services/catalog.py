@@ -9,8 +9,15 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
-from .canopy import SEARCH_PROFILES, profile_matches, score_project
-from .qualification import is_contactable_canopy_project
+from .canopy import (
+    SEARCH_PROFILES,
+    product_matches,
+    profile_matches,
+    project_product_matches,
+    score_project,
+)
+from .document_access import accessible_drawing_documents, has_accessible_drawings
+from .qualification import is_contactable_product_project
 
 
 ARCHIVED_STAGES = {"completed", "cancelled"}
@@ -28,6 +35,7 @@ class SearchFilters:
     due: str = "all"
     freshness: str = "all"
     readiness: str = "all"
+    product: str = "all"
     profile: str = ""
     include_archived: bool = False
     page: int = 1
@@ -131,7 +139,7 @@ class ProjectCatalog:
         self.projects = [
             project
             for project in source_projects
-            if is_contactable_canopy_project(project)
+            if is_contactable_product_project(project)
         ]
         self.sources: list[dict[str, Any]] = snapshot.get("sources", [])
         self.coverage: dict[str, Any] = snapshot.get("coverage", {})
@@ -146,9 +154,19 @@ class ProjectCatalog:
         }
 
     def dashboard(self) -> dict[str, Any]:
+        prioritized = sorted(
+            self.projects,
+            key=lambda project: (
+                str(project.get("stage") or "unclassified") in ARCHIVED_STAGES,
+                not has_accessible_drawings(project),
+            ),
+        )
         return {
             "generatedAt": self.generated_at,
-            "projects": [self._project_response(project) for project in self.projects[:10]],
+            "projects": [
+                self._project_response(project)
+                for project in prioritized[:10]
+            ],
             "sources": self.sources,
             "coverage": self.coverage,
             "inventory": self._qualified_inventory(),
@@ -200,7 +218,21 @@ class ProjectCatalog:
             fit = score_project(project)
             if profile is not None and not profile_matches(project, profile, fit):
                 continue
-            matches.append({**project, "canopyFit": fit})
+            product_matches_for_project = project_product_matches(project)
+            matches.append(
+                {
+                    **project,
+                    "canopyFit": fit,
+                    "hasAccessibleDrawings": has_accessible_drawings(project),
+                    "accessibleDrawingCount": len(
+                        accessible_drawing_documents(project)
+                    ),
+                    "productTypes": [
+                        match["id"] for match in product_matches_for_project
+                    ],
+                    "productMatches": product_matches_for_project,
+                }
+            )
 
         if profile is not None:
             matches.sort(
@@ -214,6 +246,7 @@ class ProjectCatalog:
             matches.sort(key=lambda item: (_parse_datetime(item.get("bidDate")) or datetime.max.replace(tzinfo=timezone.utc), item.get("title", "")))
         else:
             matches.sort(key=lambda item: _parse_datetime(item.get("updatedAt")) or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
+        matches.sort(key=lambda item: not bool(item["hasAccessibleDrawings"]))
 
         total = len(matches)
         total_pages = max(1, math.ceil(total / page_size))
@@ -235,12 +268,23 @@ class ProjectCatalog:
                 "nationallyComplete": bool(self.coverage.get("nationallyComplete", False)),
                 "warnings": self.warnings,
                 "profile": profile.id if profile is not None else None,
+                "accessibleDrawingProjects": sum(
+                    bool(project["hasAccessibleDrawings"]) for project in matches
+                ),
             },
         }
 
     @staticmethod
     def _project_response(project: dict[str, Any]) -> dict[str, Any]:
-        return {**project, "canopyFit": score_project(project)}
+        matches = project_product_matches(project)
+        return {
+            **project,
+            "canopyFit": score_project(project),
+            "hasAccessibleDrawings": has_accessible_drawings(project),
+            "accessibleDrawingCount": len(accessible_drawing_documents(project)),
+            "productTypes": [match["id"] for match in matches],
+            "productMatches": matches,
+        }
 
     def _matches_project(
         self,
@@ -256,6 +300,8 @@ class ProjectCatalog:
         if filters.stage != "all" and stage != filters.stage:
             return False
         if not filters.include_archived and stage in ARCHIVED_STAGES:
+            return False
+        if not product_matches(project, filters.product):
             return False
 
         if requested_state and requested_state != "all":
@@ -342,8 +388,18 @@ class ProjectCatalog:
                         "projectId": project["id"],
                         "projectTitle": project["title"],
                         **document,
+                        "isAccessibleDrawing": (
+                            document in accessible_drawing_documents(project)
+                        ),
                     }
                 )
+        documents.sort(
+            key=lambda document: (
+                not bool(document.get("isAccessibleDrawing")),
+                str(document.get("projectTitle") or "").casefold(),
+                str(document.get("name") or "").casefold(),
+            )
+        )
         return self._page(documents, page, limit, "documents")
 
     @staticmethod

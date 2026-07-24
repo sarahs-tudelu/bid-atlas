@@ -73,7 +73,9 @@ def google_status() -> dict[str, Any]:
 
 
 @router.get("/google/start")
-def google_start() -> Response:
+def google_start(
+    next_path: str = Query(default="/outreach", alias="next", max_length=200),
+) -> Response:
     try:
         oauth_credentials()
         secret = _session_secret()
@@ -82,8 +84,14 @@ def google_start() -> Response:
 
     state = secrets.token_urlsafe(32)
     verifier, challenge = pkce_pair()
+    safe_next = next_path if next_path in {"/", "/outreach", "/inbox"} else "/outreach"
     token = sign_payload(
-        {"state": state, "verifier": verifier, "exp": int(time.time()) + OAUTH_STATE_TTL_SECONDS},
+        {
+            "state": state,
+            "verifier": verifier,
+            "next": safe_next,
+            "exp": int(time.time()) + OAUTH_STATE_TTL_SECONDS,
+        },
         secret,
         purpose="oauth-state",
     )
@@ -131,7 +139,10 @@ def google_callback(
         _session_secret(),
         purpose="session",
     )
-    redirect = RedirectResponse(f"{settings.public_url}/outreach", status_code=302)
+    next_path = str(payload.get("next") or "/outreach")
+    if next_path not in {"/", "/outreach", "/inbox"}:
+        next_path = "/outreach"
+    redirect = RedirectResponse(f"{settings.public_url}{next_path}", status_code=302)
     redirect.set_cookie(
         SESSION_COOKIE,
         session,

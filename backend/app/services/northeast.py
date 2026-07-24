@@ -51,6 +51,13 @@ SAM_QUERIES = (
     "shade structure",
     "passenger shelter",
     "entrance renovation",
+    "pergola",
+    "partition wall",
+    "interior partition",
+    "demountable partition",
+    "operable wall",
+    "movable wall",
+    "toilet partition",
 )
 MAX_SOURCE_BYTES = 5_000_000
 MAX_SAM_BYTES = 10_000_000
@@ -487,7 +494,7 @@ def _normalize_sam_project(record: dict[str, Any], state: str, checked_at: str) 
         "postedAt": posted.isoformat() if posted else None,
         "updatedAt": checked_at,
         "bidDate": deadline.isoformat() if deadline else None,
-        "sourceName": f"SAM.gov Canopy Opportunities - {state}",
+        "sourceName": f"SAM.gov Product Opportunities - {state}",
         "sourceUrl": ui_link,
         "provenance": "live-public-api",
         "confidence": "official",
@@ -575,7 +582,7 @@ def fetch_sam_state(
     projects.sort(key=lambda project: (-score_project(project)["score"], str(project.get("bidDate") or "9999-12-31")))
     source = {
         "id": sam_source_id(state),
-        "name": f"SAM.gov Canopy Opportunities - {state}",
+        "name": f"SAM.gov Product Opportunities - {state}",
         "owner": "U.S. General Services Administration",
         "level": "federal",
         "sourceClass": "procurement",
@@ -592,7 +599,7 @@ def fetch_sam_state(
         "jurisdiction": state,
         "stateCode": state,
         "coverageField": "federalProcurement",
-        "note": "Official SAM.gov active opportunities filtered by place of performance and canopy relevance. This is federal, not statewide procurement coverage.",
+        "note": "Official SAM.gov active opportunities filtered by place of performance and canopy, pergola, or partition-wall relevance. This is federal, not statewide procurement coverage.",
     }
     return SourceRefreshResult(sam_source_id(state), projects, source), warnings
 

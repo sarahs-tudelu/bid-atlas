@@ -1,18 +1,19 @@
 # BidAtlas architecture
 
-This document describes the active React/FastAPI/AWS implementation. The complete operator and user workflow is in [`README.md`](README.md); source expansion policy is in [`docs/NATIONAL_BID_COVERAGE_PLAN.md`](docs/NATIONAL_BID_COVERAGE_PLAN.md); marketing identity and reply-routing policy is in [`docs/COLD_OUTREACH_INTEGRATION.md`](docs/COLD_OUTREACH_INTEGRATION.md).
+This document describes the active React/FastAPI/AWS implementation. The complete operator and user workflow is in [`README.md`](README.md); source expansion policy is in [`docs/NATIONAL_BID_COVERAGE_PLAN.md`](docs/NATIONAL_BID_COVERAGE_PLAN.md); marketing identity and reply-routing policy is in [`docs/COLD_OUTREACH_INTEGRATION.md`](docs/COLD_OUTREACH_INTEGRATION.md); Gmail filing policy is in [`docs/GMAIL_PROJECT_INBOX.md`](docs/GMAIL_PROJECT_INBOX.md).
 
 > Architecture changes are incomplete until this document, the README, relevant domain docs, tests, and deployment configuration agree.
 
 ## Design objectives
 
-1. Show actionable Canopy opportunities rather than a noisy construction dump.
+1. Show actionable canopy, pergola, and partition-wall opportunities rather than a noisy construction dump.
 2. Preserve a verifiable official-source trail and honest coverage reporting.
 3. Authenticate internal work with a verified Tudelu identity.
 4. Default reviewed outreach to the designated marketing mailbox while preserving an explicit signed-in employee Gmail option.
 5. Make arbitrary-recipient relay, duplicate sending, and cross-user workspace access impossible through the normal API contract.
-6. Keep runtime secrets out of Git, Lambda environment values, frontend bundles, logs, and CloudFormation templates.
-7. Keep one independently deployable AWS serverless stack.
+6. Organize employee Gmail correspondence without cloning or indexing an employee’s entire mailbox.
+7. Keep runtime secrets out of Git, Lambda environment values, frontend bundles, logs, and CloudFormation templates.
+8. Keep one independently deployable AWS serverless stack.
 
 ## System context
 
@@ -24,13 +25,18 @@ Tudelu browser -> CloudFront -> API Gateway -> FastAPI Lambda
        |              |                              |
        |              +-> private frontend S3       +-> DynamoDB workspace
        |                                             +-> private catalog S3
+       |                                             +-> private documents S3
        v
 React authenticated SPA
 
 EventBridge -> National refresh Lambda -> regional official sources + nationwide SAM.gov API
                                       -> versioned catalog S3
+EventBridge -> Public-source refresh Lambda -> implemented state/DOT/municipal adapters
+                                           -> versioned catalog S3
 EventBridge -> Marketing reply-sync Lambda -> Instantly received mail
                                           -> designated Tudelu sales owner
+EventBridge -> Gmail inbox-sync Lambda -> known contacts + tracked Gmail threads
+                                       -> DynamoDB correspondence + private documents S3
 ```
 
 CloudFront makes the frontend and API same-origin. The default behavior serves the SPA from private S3 through Origin Access Control. `/api/*` and `/health` use a caching-disabled API Gateway origin and forward viewer cookies. Extensionless SPA rewriting is attached only to the frontend behavior, so API callbacks are never rewritten to `index.html`.
@@ -43,7 +49,7 @@ Health, catalog, search, coverage, source-registry, company, document, and OAuth
 
 ### Authenticated workspace boundary
 
-Bid drafts, source monitors, outreach drafts/history, Gmail history, and sending depend on `require_user`. The dependency validates an HMAC-signed, expiring HttpOnly cookie and then confirms that the email still has a Google account record in DynamoDB. The browser no longer supplies an identity header.
+Bid drafts, source monitors, outreach drafts/history, the project inbox, Gmail history, attachment downloads, and sending depend on `require_user`. The dependency validates an HMAC-signed, expiring HttpOnly cookie and then confirms that the email still has a Google account record in DynamoDB. The browser no longer supplies an identity header.
 
 Every mutable record is partitioned by the normalized verified Google email. User input cannot select another owner partition.
 
@@ -60,17 +66,17 @@ The API Lambda alone can decrypt OAuth client credentials. OAuth uses:
 
 The state cookie lasts 10 minutes. The application session lasts 12 hours and is HttpOnly, Secure in production, and SameSite=Lax. Provider access tokens are refreshed server-side and never returned to React.
 
-Gmail access is restricted to the configured `gmail.readonly` and `gmail.send` scopes. History normalization discards bodies and stores only headers, short snippets, and provider IDs. Sending uses `users/me/messages/send`, so the authenticated mailbox is the sender.
+Gmail access is restricted to the configured `gmail.readonly` and `gmail.send` scopes. History and inbox normalization discard bodies and store only headers, bounded snippets, matching evidence, and provider IDs. Inbox discovery is constrained to known project contacts and tracked threads. Sending uses `users/me/messages/send`, so the authenticated mailbox is the sender. Matched attachment bytes are stored only in the private documents bucket; an authenticated owner check is required before the API creates a five-minute download URL.
 
 ### Instantly provider boundary
 
-Marketing mode is the default, but no provider call occurs until the authenticated employee reviews and confirms a draft. The API Lambda can send only through the configured `outreach@tudelugroup.com` account. The browser cannot provide another marketing sender, arbitrary reply owner, or provider token. A cross-user recipient lock and 14-day cooldown protect the shared identity.
+Marketing mode is the default, but no provider call occurs until the authenticated employee reviews and confirms a draft. The default is `outreach@tudelugroup.com`; the selectable account list is fetched through the server-held token, and every nondefault sender is revalidated against that provider-authorized list before generation and send. The browser cannot invent a marketing sender, arbitrary reply owner, or provider token. A cross-user recipient lock and 14-day cooldown protect all shared marketing identities.
 
-The scheduled reply Lambda polls received messages for that same account, matches the prospect and timestamp to an existing BidAtlas route, suppresses provider-marked or deterministic automatic replies, and forwards human responses to the designated sales owner with the prospect address as Reply-To. It stores only a bounded snippet, provider ID, routing metadata, and forwarding status. A provider reply ID is processed once unless a recorded forwarding attempt failed.
+The scheduled reply Lambda groups routes by their recorded sender account, polls received messages for each applicable account, matches the prospect and timestamp to an existing BidAtlas route, suppresses provider-marked or deterministic automatic replies, and forwards human responses through the same account to the designated sales owner with the prospect address as Reply-To. It stores only a bounded snippet, provider ID, routing metadata, and forwarding status. A provider reply ID is processed once unless a recorded forwarding attempt failed.
 
 ### Anthropic provider boundary
 
-The API Lambda alone can decrypt the Anthropic key. Initial email generation does not call Anthropic; it creates a deterministic signed template. Only `personalize: true` sends Claude a bounded project-facts object and at most 20 minimized contact-history records; full bodies and provider IDs are excluded. Prompts label source and message material as untrusted data. Claude supplies only editable subject/body text and cannot select a recipient, sender, reply owner, access tokens, or send mail. FastAPI appends the approved Alex marketing signoff or verified employee’s Tudelu signature after generation.
+The API Lambda alone can decrypt the Anthropic key. Initial email generation does not call Anthropic; it creates a deterministic signed template. Only `personalize: true` sends Claude a bounded project-facts object and at most 20 minimized contact-history records; full bodies and provider IDs are excluded. Prompts label source and message material as untrusted data. Claude supplies only editable subject/body text and cannot select a recipient, sender, reply owner, access tokens, or send mail. FastAPI appends the server-resolved marketing persona or verified employee’s Tudelu signature after generation.
 
 ### AWS secret boundary
 
@@ -81,6 +87,7 @@ Parameter Store contains six SecureStrings. Lambda environment variables contain
 | API Lambda | Google client ID, Google client secret, session secret, Anthropic API key, Instantly token |
 | Refresh Lambda | SAM.gov API key |
 | Marketing reply-sync Lambda | Instantly token |
+| Gmail inbox-sync Lambda | Google client ID and Google client secret |
 
 The Google client ID is not intrinsically confidential, but it follows the same promotion and configuration workflow to avoid coupling deployment to a local ignored file.
 
@@ -101,14 +108,22 @@ The checked-in `data-export/current-projects.json` is a reproducible deployment 
 ### Qualification invariant
 
 ```text
-visible(project) = canopy_score(project) >= 8
+visible(project) = product_score(project) >= 8
                    AND (count(valid_source_published_email(project)) > 0
                         OR count(valid_source_published_phone(project)) > 0)
 ```
 
-`services/qualification.py` owns this invariant. No route should duplicate or weaken it. A new catalog surface must operate on `ProjectCatalog.projects` or explicitly call the same predicate.
+`services/qualification.py` owns this invariant. The scorer preserves the `canopyFit` response field for compatibility while classifying explicit `productTypes`/`productMatches` for canopies, pergolas, and partition walls. No route should duplicate or weaken the invariant. A new catalog surface must operate on `ProjectCatalog.projects` or explicitly call the same predicate.
 
 The dashboard recomputes visible total/stage/company inventory. `/api/coverage` intentionally returns the raw ingestion inventory to measure connectors. Search metadata exposes raw and qualified counts so the difference remains observable.
+
+Search and dashboard results use a stable drawing-readiness priority after the requested relevance/readiness sort. A project is drawing-ready only when an official document is classified as plans/drawings, is marked `open` or `public`, and has an HTTPS route. Project and document responses expose that result without treating account-gated plan systems as publicly accessible.
+
+### Tri-state partner directory
+
+`data-export/new-jersey-partner-directory.json` and `data-export/tri-state-research-prospects.json` are curated prospecting aids rather than project-opportunity feeds. Together they contain NJ/NY/CT design firms, developers, owners, and installer partners with a published business email address or phone number. `PartnerDirectory` enforces the tri-state, source-URL, organization-type, and contact requirements again when loading the files.
+
+`GET /api/partner-directory` supports text, organization-type, and product-scope filters. Each returned record includes its published contact, source URL, verification date, and plain-language scope reasoning. Email-capable records can be converted into synthetic `prospect:` opportunities for the existing reviewed outreach workflow; phone-only records expose a call action and are excluded from email draft selection. The UI explicitly labels the reasoning as potential alignment—not evidence of an active project, procurement, or endorsement.
 
 ## National source refresh
 
@@ -119,13 +134,17 @@ EventBridge invokes `jobs/refresh_national.handler` daily. The orchestrator fetc
 - CT/RI WebProcure public boards;
 - Massachusetts DCR and Pennsylvania DGS;
 - New Hampshire and Vermont DOT/ArcGIS services;
-- official SAM.gov Opportunities API searches for all 50 states and D.C.; each configured Canopy/proxy query runs once nationwide and records are split locally into independent state partitions by published place of performance.
+- District of Columbia PASS solicitations through the official public ArcGIS service, including record-level contracting-officer contacts;
+- New York City Record procurement solicitations through the official Socrata API, including record-level procurement contacts;
+- official SAM.gov Opportunities API searches for all 50 states and D.C.; each configured canopy, pergola, partition-wall, or proxy query runs once nationwide and records are split locally into independent state partitions by published place of performance.
 
 The SAM connector paginates with the official API’s documented maximum 1,000-record page for each nationwide keyword query, up to a guarded five-page ceiling. It paces requests, applies bounded global backoff to HTTP 429 responses, deduplicates notices returned by multiple queries, normalizes place of performance and `pointOfContact`, applies relevance scoring, and retains source links. It warns if a query exceeds the guard rather than claiming completeness. The key permits the API’s documented keyed rate/usage path; it is not used to evade site access controls.
 
-The seven-keyword batch is transactional for provider failures: if any keyword request fails, all prior state partitions are retained instead of being replaced by partial data. A complete batch is split into 51 state/D.C. results, allowing source-level health and coverage to remain independently observable. Notices returned by multiple queries are deduplicated before partitioning. Aggregated inventory and coverage are recomputed after merge, then S3 receives a new object version. FastAPI request latency is independent of publisher availability.
+The 14-keyword SAM batch is transactional for provider failures: if any keyword request fails, all prior state partitions are retained instead of being replaced by partial data. A complete batch is split into 51 state/D.C. results, allowing source-level health and coverage to remain independently observable. Notices returned by multiple queries are deduplicated before partitioning. The independently fetched D.C. PASS and NYC City Record partitions can still refresh if SAM fails. Aggregated inventory and coverage are recomputed after merge, then S3 receives a new object version. FastAPI request latency is independent of publisher availability.
 
 The CT/RI connector includes a narrowly scoped, checksum-pinned Thawte intermediate certificate because the publisher currently serves an incomplete chain. Hostname and certificate validation remain enabled. Reassess before the certificate expires on 2027-11-02.
+
+In addition, EventBridge invokes `infra/handlers/legacy-source-refresh.handler` daily for the implemented public connector library that is not owned by the Python refresh. It merges source partitions transactionally: successful partitions replace their prior records, a degraded partition is accepted only when it returned usable project data, and failed partitions retain the last good data. The worker uses the official TxDOT endpoints with a narrowly scoped DigiCert intermediate because that host currently serves an incomplete chain; hostname and certificate validation remain enabled.
 
 ## Outreach sequence
 
@@ -161,6 +180,14 @@ EventBridge       Reply Lambda           DynamoDB           Instantly       Sale
   |                  | match/dedupe/suppress|                  |                 |
   |                  | forward human reply ------------------->|---------------->|
   |                  | forwarding audit --->|                  |                 |
+
+EventBridge       Gmail Inbox Lambda      Gmail API          DynamoDB        Documents S3
+  | every 5 min      |                       |                   |                |
+  |----------------->| list accounts ------>|                   |                |
+  |                  | query contacts/threads ----------------->|                |
+  |                  | normalize + match                        |                |
+  |                  | correspondence audit ------------------->|                |
+  |                  | matched attachment ------------------------------------->|
 ```
 
 The draft payload is never trusted as recipient, sender, or reply-owner authority. Save and send reload the current admitted project, compare the normalized `to` address with its published contacts, force the marketing sender from configuration, and restrict reply owners to the server list. Subject line breaks are rejected. The send path refuses an existing sent record and acquires an atomic `put_if_absent` record before contacting either provider. The lock is removed in a `finally` block after success or provider failure.
@@ -178,6 +205,8 @@ The DynamoDB table uses `owner` as partition key and `recordKey` as sort key. Pa
 | `google#account` | identity, access/refresh tokens, scopes, expiry | Provider credential; backend-only |
 | `draft#<project>` | bid-desk fields | Internal business data |
 | `outreach#<project>` | draft, contacts, snippets, sender mode, reply owner, status, provider IDs | Internal communication audit |
+| `correspondence#<gmail-message-id>` | headers, bounded snippet, direction, project match/evidence, attachment metadata | Internal communication audit |
+| `gmail-inbox#state` | last successful checkpoint and bounded sync counters/warnings | Operational |
 | `gmail-send-lock#<project>` | transient send coordination | Operational |
 | `monitor#<uuid>` | proposed source URL/status | Internal workflow |
 | `route#<recipient-hash>` under system owner | latest marketing send, project, sales owner, cooldown timestamp | Internal routing audit |
@@ -186,7 +215,7 @@ The DynamoDB table uses `owner` as partition key and `recordKey` as sort key. Pa
 
 Production uses on-demand capacity, AWS-managed encryption, point-in-time recovery, and a retain removal policy. Local development/tests use a process-local dictionary with equivalent owner/key behavior.
 
-The documents S3 bucket is an encrypted, versioned, retained boundary for future protected content. The current UI deep-links to official documents and does not proxy or copy them.
+The documents S3 bucket is encrypted, versioned, private, SSL-only, and retained. Gmail attachments are stored at `gmail/<owner-hash>/<message-id>/<index>-<safe-name>`. DynamoDB stores the private object key, but the API response does not. Source-published documents remain direct official links and are not copied.
 
 ## Frontend composition
 
@@ -194,9 +223,11 @@ The documents S3 bucket is an encrypted, versioned, retained boundary for future
 
 `apiRequest` is same-origin by default, always includes browser credentials, adds JSON headers when needed, normalizes FastAPI errors, and handles 204 responses. It carries no browser-generated identity.
 
-`AppShell` shows the current email and sign-out. Search pages use URL query parameters as shareable state. `OutreachPage` keeps selected-project draft state isolated, renders provider metadata, restricts recipients to a source-backed select, defaults to the server-declared marketing identity, permits an explicit employee-Gmail selection, restricts marketing reply owners to the server list, requires browser confirmation, and disables mutations after sent status.
+`AppShell` shows the current email and sign-out. Search pages use URL query parameters as shareable state, including the `product` classification filter. Project cards render product-category evidence separately from the overall fit score, expose plain-language scoring reasons, and use equal-height desktop rows. Project-workspace links carry an allowlisted internal return destination so navigation returns to the originating filtered leads/bids, inbox, dashboard, companies, or documents page. `OutreachPage` keeps selected-project draft state isolated, renders provider metadata, restricts recipients to a source-backed select, defaults to the server-declared marketing identity, permits selection among provider-authorized marketing identities or the employee's Gmail account, restricts marketing reply owners to the server list, requires browser confirmation, and disables mutations after sent status.
 
-Project cards and Bid Desk derive independent email and phone actions from published participants. The Outreach project picker filters to email-capable projects. Changing sender mode regenerates the draft so its visible signature matches the enforced provider identity. The initial draft is deterministic; the explicit personalization button is the only frontend path that invokes Claude.
+`InboxPage` uses URL-driven project, assignment-status, search, and page filters. It shows the owner’s project folders, deterministic matching explanation, manual assignment control, and authenticated attachment links. `BidDeskPage` embeds the project’s latest correspondence and files without weakening the API ownership boundary.
+
+Project cards and Project Workspace derive independent email and phone actions from published participants. The Outreach project picker filters to email-capable projects. Changing sender mode regenerates the draft so its visible signature matches the enforced provider identity. The initial draft is deterministic; the explicit personalization button is the only frontend path that invokes Claude.
 
 The UI gate is a usability boundary; the FastAPI dependency is the authorization boundary.
 
@@ -211,21 +242,25 @@ The UI gate is a usability boundary; the FastAPI dependency is the authorization
 | `api/catalog.py` | public validation and discovery contract |
 | `api/workspace.py` | authenticated drafts/monitors; safe integration status |
 | `api/outreach.py` | authenticated generate/history/save/send orchestration |
+| `api/inbox.py` | authenticated correspondence listing, sync, manual assignment, and attachment downloads |
 | `services/auth.py` | identity predicate and purpose-bound signed payloads |
 | `services/google.py` | Google HTTP/OAuth/token/Gmail client |
+| `services/gmail_inbox.py` | project-scoped Gmail discovery, deterministic matching, minimization, and attachment filing |
 | `services/marketing_outreach.py` | Instantly delivery/reply client, marketing identity, cooldown, routing, reply normalization |
 | `services/outreach.py` | sender-aware deterministic draft and delivery-field validation |
 | `services/ai_outreach.py` | SAM-style Anthropic prompt, bounded context, response validation, fixed Tudelu signature |
 | `services/runtime_secrets.py` | lazy cached SSM decryption |
 | `services/qualification.py` | global visibility and published contacts |
 | `services/catalog.py` | catalog admission, filters, sort, paging, aggregates |
-| `services/canopy.py` | deterministic fit model and profiles |
+| `services/canopy.py` | deterministic fit model, product classification, and profiles |
 | `services/geography.py` | canonical 50-state/D.C. partition set |
 | `services/national.py` | nationwide federal fan-out and regional orchestration |
 | `services/state.py` | DynamoDB/memory operations and conditional records |
 | `services/northeast*.py` | source-specific regional and SAM-state fetch/parse/normalize |
+| `services/public_procurement.py` | official D.C. PASS and NYC City Record open-solicitation fetch/parse/normalize |
 | `services/source_refresh.py` | partition-safe snapshot merge |
 | `jobs/sync_marketing_replies.py` | scheduled reply matching, suppression, forwarding, and audit |
+| `jobs/sync_gmail_inboxes.py` | scheduled per-account project correspondence and attachment sync |
 
 The Google service deliberately uses Python’s standard HTTP library, keeping the Lambda runtime dependency set small. `boto3` is supplied by Lambda and imported lazily so local catalog work does not require AWS initialization.
 
@@ -235,6 +270,9 @@ The Google service deliberately uses Python’s standard HTTP library, keeping t
 - Missing production secrets: auth status reports unconfigured and OAuth start returns `503`.
 - OAuth state/domain failure: callback refuses the login without creating an account/session.
 - Revoked/missing refresh token: Gmail operation returns a reconnect error; no sent record is written.
+- Missing `gmail.readonly` grant: inbox sync requests reconnection and does not scan the mailbox.
+- Ambiguous project match: message is retained in the owner’s unassigned review queue; no project is guessed.
+- Attachment over 20 MB, message attachment total over 30 MB, or attachment download failure: correspondence is retained with a visible bounded warning and the file is skipped.
 - Gmail provider/network failure: `502`; send lock is released; draft remains unsent.
 - Missing/failed Instantly marketing provider: configuration reports unavailable or send returns `502`; the cross-user lock is released and no route/sent record is written.
 - Instantly reply-list failure: scheduled invocation fails for EventBridge retry; no reply dispositions are written.
@@ -250,7 +288,7 @@ The Google service deliberately uses Python’s standard HTTP library, keeping t
 
 ## Deployment and caching
 
-CDK bundles the Python API, national refresh, and marketing reply-sync functions in the official Python 3.12 x86-64 build image. The API timeout stays below API Gateway’s response boundary; the national refresh has 1,024 MB of memory and a 15-minute timeout for the bounded 51-partition fan-out; the reply sync has 512 MB and a two-minute timeout. EventBridge runs reply sync every five minutes with two retries.
+CDK bundles the Python API, national refresh, marketing reply-sync, and Gmail inbox-sync functions in the official Python 3.12 x86-64 build image. The API timeout stays below API Gateway’s response boundary; the national refresh has 1,024 MB of memory and a 15-minute timeout for the bounded 51-partition fan-out; the marketing reply sync has 512 MB and a two-minute timeout; the Gmail inbox sync has 1,024 MB and a five-minute timeout. EventBridge runs both mail synchronization jobs every five minutes with two retries.
 
 Frontend hashed assets are immutable for one year. `index.html` is no-store and CloudFront is invalidated on deployment. API behavior disables caching, which is required for cookies, auth status, drafts, and provider operations.
 

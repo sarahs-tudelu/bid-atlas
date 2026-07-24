@@ -29,7 +29,7 @@ def _write_json(path: Path, value: dict) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Refresh official regional portals and nationwide SAM.gov canopy sources."
+        description="Refresh official regional portals and nationwide product-opportunity sources."
     )
     parser.add_argument("--data-dir", type=Path, default=Path("data-export"))
     args = parser.parse_args()

@@ -2,6 +2,8 @@ import { Link } from "react-router-dom";
 
 import { describeDeadline, formatMoney } from "../lib/format";
 import { emailContacts, phoneContacts, telephoneHref } from "../lib/contacts";
+import { projectWorkspaceHref } from "../lib/projectNavigation";
+import { summarizeFitReasons } from "../lib/productFit";
 import { STAGE_LABELS } from "./ProjectSearch";
 import type { Project } from "../types";
 
@@ -12,11 +14,11 @@ function location(project: Project): string {
   );
 }
 
-export function ProjectCard({ project }: { project: Project }) {
+export function ProjectCard({ project, returnTo }: { project: Project; returnTo?: string }) {
   const documentCount = project.documents?.length ?? 0;
   const deadline = describeDeadline(project.bidDate);
   const stage = project.stage ?? "unclassified";
-  const workspaceHref = `/bid-desk?project=${encodeURIComponent(project.id)}`;
+  const workspaceHref = projectWorkspaceHref(project.id, returnTo);
   const emailContact = emailContacts(project)[0];
   const phoneContact = phoneContacts(project)[0];
 
@@ -25,9 +27,19 @@ export function ProjectCard({ project }: { project: Project }) {
       <div className="project-card-topline">
         <div className="project-badges">
           <span className={`stage-badge stage-${stage}`}>{STAGE_LABELS[stage] ?? stage.replace("-", " ")}</span>
+          {project.productMatches?.map((match) => (
+            <span className="product-badge" key={match.id} title={match.reasons.join(", ")}>
+              {match.label}
+            </span>
+          ))}
           {project.canopyFit && project.canopyFit.band !== "low" ? (
             <span className={`fit-badge fit-${project.canopyFit.band}`} title={project.canopyFit.reasons.join(", ")}>
-              Canopy fit {project.canopyFit.score}
+              Product fit {project.canopyFit.score}
+            </span>
+          ) : null}
+          {project.hasAccessibleDrawings ? (
+            <span className="drawing-badge">
+              Drawings available
             </span>
           ) : null}
         </div>
@@ -46,6 +58,13 @@ export function ProjectCard({ project }: { project: Project }) {
       </h3>
       <p className="project-summary">{project.summary || "No summary was published by the source."}</p>
 
+      {project.canopyFit?.reasons.length ? (
+        <div className="fit-explanation">
+          <strong>Why this score</strong>
+          <span>{summarizeFitReasons(project.canopyFit.reasons)}</span>
+        </div>
+      ) : null}
+
       <dl className="project-facts">
         <div>
           <dt>Location</dt>
@@ -62,7 +81,11 @@ export function ProjectCard({ project }: { project: Project }) {
         <div>
           <dt>Evidence</dt>
           <dd className={documentCount ? "" : "is-muted"}>
-            {documentCount ? `${documentCount} official route${documentCount === 1 ? "" : "s"}` : "No document route"}
+            {project.hasAccessibleDrawings
+              ? `${project.accessibleDrawingCount ?? 1} public drawing route${(project.accessibleDrawingCount ?? 1) === 1 ? "" : "s"}`
+              : documentCount
+                ? `${documentCount} official route${documentCount === 1 ? "" : "s"}`
+                : "No document route"}
           </dd>
         </div>
       </dl>
@@ -75,7 +98,7 @@ export function ProjectCard({ project }: { project: Project }) {
 
       <div className="project-actions">
         <Link className="button button-primary" to={workspaceHref}>
-          Open bid desk
+          Open project workspace
         </Link>
         {emailContact ? (
           <Link className="button button-quiet" to={`/outreach?project=${encodeURIComponent(project.id)}`}>

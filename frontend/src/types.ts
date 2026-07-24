@@ -16,6 +16,7 @@ export interface ProjectDocument {
   url: string;
   access?: string;
   indexStatus?: string;
+  isAccessibleDrawing?: boolean;
 }
 
 export interface ProjectParticipant {
@@ -34,12 +35,22 @@ export interface CanopyFit {
   reasons: string[];
 }
 
+export type ProductType = "canopies" | "pergolas" | "partition-walls";
+
+export interface ProductMatch {
+  id: ProductType;
+  label: string;
+  score: number;
+  reasons: string[];
+}
+
 export interface SearchPreset {
   id: string;
   label: string;
   description: string;
   minimumScore: number;
   states: string[];
+  products: ProductType[];
 }
 
 export interface OutreachContact {
@@ -70,10 +81,83 @@ export interface GmailThreadSummary {
   messages: GmailMessageSummary[];
 }
 
+export interface CorrespondenceAttachment {
+  name: string;
+  mimeType: string;
+  size: number;
+  status: "filed";
+  downloadUrl: string;
+}
+
+export interface CorrespondenceMessage {
+  messageId: string;
+  threadId: string;
+  projectId: string;
+  projectTitle: string;
+  sourceRecordId: string;
+  candidateProjectIds: string[];
+  matchedBy:
+    | "gmail-thread"
+    | "project-reference"
+    | "published-contact"
+    | "contact-and-title"
+    | "sent-from-project"
+    | "manual"
+    | "needs-review";
+  matchConfidence: "high" | "medium" | "unassigned";
+  subject: string;
+  from: string;
+  to: string;
+  cc: string;
+  occurredAt: string;
+  direction: "sent" | "received";
+  snippet: string;
+  attachments: CorrespondenceAttachment[];
+  hasAttachments: boolean;
+  attachmentWarnings: string[];
+  updatedAt?: string;
+}
+
+export interface InboxProject {
+  id: string;
+  title: string;
+  sourceRecordId: string;
+  messageCount: number;
+}
+
+export interface InboxResponse {
+  messages: CorrespondenceMessage[];
+  projects: InboxProject[];
+  meta: {
+    total: number;
+    page: number;
+    pageSize: number;
+    totalPages: number;
+    allMessages: number;
+    assignedMessages: number;
+    unassignedMessages: number;
+    gmailConnected: boolean;
+    gmailReadAccess: boolean;
+    sync: {
+      lastSuccessfulSync: string;
+      messagesStored: number;
+      assignedMessages: number;
+      filedAttachments: number;
+      warnings: string[];
+    } | null;
+  };
+}
+
 export interface OutreachDraft {
   projectId: string;
   projectTitle: string;
   sourceRecordId: string;
+  recordType?: "project" | "prospect";
+  sourceUrl?: string;
+  productTypes?: ProductType[];
+  prospectFitReasons?: string[];
+  prospectPriorityRank?: number | null;
+  prospectOrganizationType?: string;
   to: string;
   contactName: string;
   subject: string;
@@ -86,6 +170,7 @@ export interface OutreachDraft {
   sentBy?: string;
   senderMode: "marketing" | "employee";
   senderEmail: string;
+  marketingSenderEmail?: string;
   replyOwnerEmail: string;
   replyOwnerName: string;
   deliveryProvider?: "instantly:test-email" | "gmail";
@@ -102,6 +187,16 @@ export interface OutreachDraft {
 export interface OutreachConfig {
   defaultSenderMode: "marketing";
   marketing: { configured: boolean; email: string; name: string };
+  marketingAccounts: Array<{
+    email: string;
+    name: string;
+    status: string;
+    statusCode: number;
+    warmupStatus: number;
+    providerCode: number;
+    setupPending: boolean;
+  }>;
+  marketingAccountsWarning?: string;
   employee: { email: string; name: string };
   salesReplyOwners: Array<{ email: string; name: string }>;
   defaultReplyOwnerEmail: string;
@@ -131,7 +226,11 @@ export interface Project {
   documents?: ProjectDocument[];
   participants?: ProjectParticipant[];
   documentTextIndexed?: boolean;
+  hasAccessibleDrawings?: boolean;
+  accessibleDrawingCount?: number;
   canopyFit?: CanopyFit;
+  productTypes?: ProductType[];
+  productMatches?: ProductMatch[];
 }
 
 export interface PageMeta {
@@ -144,6 +243,7 @@ export interface PageMeta {
   snapshotGeneratedAt?: string;
   sourceMode?: string;
   warnings?: string[];
+  accessibleDrawingProjects?: number;
 }
 
 export interface SearchResponse {
@@ -221,8 +321,56 @@ export interface Company {
   projects: Array<{ id: string; title: string }>;
 }
 
+export type PartnerOrganizationType = "architect" | "developer" | "owner" | "installer";
+
+export interface PartnerOrganization {
+  id: string;
+  name: string;
+  organizationType: PartnerOrganizationType;
+  practiceType?: string;
+  researchGroup?: string;
+  priorityRank?: number;
+  contactName: string;
+  contactRole: string;
+  email: string;
+  phone: string;
+  websiteUrl: string;
+  sourceUrl: string;
+  fitSourceUrl?: string;
+  address: string;
+  city: string;
+  state: "NJ" | "NY" | "CT";
+  postalCode: string;
+  sectors: string[];
+  productTypes: ProductType[];
+  fitReasons: string[];
+  sourceLabel: string;
+  verifiedAt: string;
+}
+
+export interface PartnerDirectoryResponse {
+  organizations: PartnerOrganization[];
+  summary: {
+    directoryTotal: number;
+    architects: number;
+    developers: number;
+    owners: number;
+    installers: number;
+    emailReady: number;
+    phoneOnly: number;
+    contactPolicy: string;
+  };
+  meta: PageMeta & {
+    total: number;
+    generatedAt: string;
+    verifiedAt: string;
+    sourceMode: "curated-official-contact-directory";
+  };
+}
+
 export interface DocumentRecord extends ProjectDocument {
   id: string;
   projectId: string;
   projectTitle: string;
+  isAccessibleDrawing?: boolean;
 }

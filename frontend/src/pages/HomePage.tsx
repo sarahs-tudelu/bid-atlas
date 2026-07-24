@@ -46,7 +46,7 @@ export function HomePage() {
                 <span className="live-dot" /> AWS snapshot
               </div>
               <strong>{formatCount(data.inventory.totalProjects)}</strong>
-              <p>contactable Canopy opportunities</p>
+              <p>contactable product opportunities</p>
               <dl>
                 <div>
                   <dt>Sources</dt>
@@ -109,7 +109,7 @@ export function HomePage() {
               {data.projects?.length ? (
                 <div className="project-grid">
                   {data.projects.slice(0, 6).map((project) => (
-                    <ProjectCard key={project.id} project={project} />
+                    <ProjectCard key={project.id} project={project} returnTo="/" />
                   ))}
                 </div>
               ) : (

@@ -4,9 +4,10 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from ..dependencies import get_catalog, get_jurisdictions
+from ..dependencies import get_catalog, get_jurisdictions, get_partner_directory
 from ..services.canopy import search_profile_payload
 from ..services.catalog import JurisdictionCatalog, ProjectCatalog, SearchFilters
+from ..services.partner_directory import PartnerDirectory
 
 
 router = APIRouter(prefix="/api", tags=["catalog"])
@@ -61,6 +62,7 @@ def search(
     due: Literal["all", "today", "7-days", "14-days"] = "all",
     freshness: str = Query(default="all", max_length=40),
     readiness: Literal["all", "bid-ready"] = "all",
+    product: Literal["all", "canopies", "pergolas", "partition-walls"] = "all",
     profile: str = Query(default="", max_length=80),
     include_archived: bool = Query(default=False, alias="includeArchived"),
     page: int = Query(default=1, ge=1),
@@ -77,6 +79,7 @@ def search(
             due=due,
             freshness=freshness,
             readiness=readiness,
+            product=product,
             profile=profile,
             include_archived=include_archived,
             page=page,
@@ -119,6 +122,29 @@ def companies(
     catalog: ProjectCatalog = Depends(get_catalog),
 ) -> dict:
     return catalog.companies(query=q, page=page, limit=limit)
+
+
+@router.get("/partner-directory")
+def partner_directory(
+    q: str = Query(default="", max_length=120),
+    organization_type: Literal[
+        "all", "architect", "developer", "owner", "installer"
+    ] = Query(
+        default="all",
+        alias="type",
+    ),
+    product: Literal["all", "canopies", "pergolas", "partition-walls"] = "all",
+    page: int = Query(default=1, ge=1),
+    limit: int = Query(default=25, ge=1, le=100),
+    directory: PartnerDirectory = Depends(get_partner_directory),
+) -> dict:
+    return directory.search(
+        query=q,
+        organization_type=organization_type,
+        product=product,
+        page=page,
+        limit=limit,
+    )
 
 
 @router.get("/documents/search")

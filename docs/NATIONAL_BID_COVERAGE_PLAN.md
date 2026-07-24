@@ -134,7 +134,7 @@ Show published procurement contact, owner/agency, architect/engineer, constructi
 
 Before opening, display only confirmed public plan holders or bidders when the issuer legally publishes them. After opening, ingest bid tabs and award notices and clearly label their effective date.
 
-The active catalog admits a project only when it has at least one source-published email address or plausible phone number and a Canopy score of at least 8. Phone-only projects expose a user-initiated call action. Email outreach remains restricted to source-published email addresses. A verified `@tudelu.com` Google login owns the workspace. Reviewed email defaults to the designated marketing mailbox with a selected Tudelu sales reply owner, while the employee can explicitly choose their own Gmail account. Full inbox bodies are not retained, and a successful selected-provider response is required before sent status is recorded. See [`COLD_OUTREACH_INTEGRATION.md`](COLD_OUTREACH_INTEGRATION.md).
+The active catalog admits a project only when it has at least one source-published email address or plausible phone number and a canopy/pergola/partition-wall product-fit score of at least 8. Phone-only projects expose a user-initiated call action. Email outreach remains restricted to source-published email addresses. A verified `@tudelu.com` Google login owns the workspace. Reviewed email defaults to the configured marketing mailbox, can select another provider-authorized marketing account with a designated Tudelu sales reply owner, or can explicitly use the employee's own Gmail account. Full inbox bodies are not retained, and a successful selected-provider response is required before sent status is recorded. See [`COLD_OUTREACH_INTEGRATION.md`](COLD_OUTREACH_INTEGRATION.md).
 
 ## Coverage dashboard that tells the truth
 
@@ -149,6 +149,8 @@ Do not use decorative state percentages. Report operational measures:
 - source-level reconciliation against the publisher's current list.
 
 A state is never marked “connected” merely because one agency in that state is connected.
+
+Within qualified search and dashboard results, BidAtlas prioritizes projects with a direct HTTPS plans/drawings route marked open or public. Account-gated plan systems remain visible with their access requirement but do not receive the public-drawing priority.
 
 ## Rollout
 
@@ -174,12 +176,14 @@ The active AWS application now runs a daily national refresh. Regional source ad
 
 - New Jersey: DPMC construction advertisements and NJDOT advertised projects.
 - New York and Maine: state DOT current construction contract pages.
-- Connecticut and Rhode Island: official state-embedded WebProcure public boards, retrieved completely and then narrowed by canopy relevance.
+- Connecticut and Rhode Island: official state-embedded WebProcure public boards, retrieved completely and then narrowed by canopy, pergola, and partition-wall relevance.
 - Massachusetts and Pennsylvania: DCR and DGS current construction listings.
 - New Hampshire and Vermont: official DOT/VTrans ArcGIS project services, narrowed to relevant lifecycle records; Vermont factsheets add published project contacts when available.
-- Nationwide federal layer: each canopy/proxy query runs once across active SAM.gov opportunities, then published place of performance splits the results into independent partitions for all 50 states and D.C. when the SSM-backed API key is configured.
+- District of Columbia: official PASS solicitation records from the public ArcGIS service, including published contracting-officer contact fields.
+- New York City: official City Record procurement notices from the public Socrata service, including solicitation-specific contact fields.
+- Nationwide federal layer: each of 14 canopy, pergola, partition-wall, and related proxy queries runs once across active SAM.gov opportunities, then published place of performance splits the results into independent partitions for all 50 states and D.C. when the SSM-backed API key is configured.
 
-The SAM key activates the official Opportunities API; it does not authorize browser scraping. The request boundary uses the documented 1,000-record page, a guarded five-page ceiling, paced starts, and bounded 429 backoff. Any failed keyword request retains all prior state partitions, preventing a throttled batch from erasing good data. Results still pass contact extraction and the global Canopy/contact visibility gate before appearing to users.
+The SAM key activates the official Opportunities API; it does not authorize browser scraping. The request boundary uses the documented 1,000-record page, a guarded five-page ceiling, paced starts, and bounded 429 backoff. Any failed keyword request retains all prior state partitions, preventing a throttled batch from erasing good data. The D.C. PASS and NYC City Record sources are fetched independently, so one provider cannot suppress the others. Results still pass product classification, contact extraction, and the global product-fit/contact visibility gate before appearing to users.
 
 The CT/RI WebProcure adapter completes the publisher's currently incomplete server chain with DigiCert's official, checksum-pinned `Thawte TLS RSA CA G1` intermediate while retaining full TLS and hostname verification. Review or remove that narrowly scoped workaround before the intermediate expires on November 2, 2027.
 

@@ -196,6 +196,20 @@ def _gmail_request(
     return _json_request(f"{GMAIL_API_URL}{path}", method=method, headers=headers, data=data), active
 
 
+def gmail_request(
+    owner: str,
+    account: dict[str, Any],
+    store: WorkspaceStore,
+    path: str,
+    *,
+    method: str = "GET",
+    payload: dict[str, Any] | None = None,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Call the authenticated Gmail API while preserving refreshed credentials."""
+
+    return _gmail_request(owner, account, store, path, method=method, payload=payload)
+
+
 def gmail_history(
     owner: str,
     account: dict[str, Any],
@@ -280,4 +294,7 @@ def send_gmail_message(
         method="POST",
         payload={"raw": raw},
     )
-    return {"messageId": str(result.get("id") or ""), "threadId": str(result.get("threadId") or "")}
+    message_id = str(result.get("id") or "")
+    if not message_id:
+        raise GoogleApiError("Gmail accepted the request without returning a message identifier")
+    return {"messageId": message_id, "threadId": str(result.get("threadId") or "")}

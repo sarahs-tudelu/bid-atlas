@@ -19,10 +19,13 @@ from backend.app.services.northeast import (
 )
 from backend.app.services.source_refresh import merge_source_snapshot
 from backend.app.services.northeast_portals import (
+    CONNECTICUT_DOT_SOURCE_ID,
     MASSACHUSETTS_SOURCE_ID,
+    NEW_HAMPSHIRE_DOT_BID_SOURCE_ID,
     PENNSYLVANIA_SOURCE_ID,
     WEBPROCURE_SOURCES,
     _webprocure_ssl_context,
+    fetch_new_hampshire_bids,
     fetch_vermont_projects,
     fetch_webprocure_source,
     parse_massachusetts_dcr_projects,
@@ -168,6 +171,98 @@ def test_webprocure_connector_keeps_relevant_open_bid_and_contact() -> None:
     assert warnings == []
     assert len(result.projects) == 1
     assert result.projects[0]["participants"][0]["email"] == "pat.buyer@example.gov"
+
+
+def test_ctdot_webprocure_connector_keeps_complete_agency_board() -> None:
+    config = next(
+        source
+        for source in WEBPROCURE_SOURCES
+        if source.source_id == CONNECTICUT_DOT_SOURCE_ID
+    )
+
+    def fake_html(url: str) -> str:
+        assert url == config.source_url
+        return "_wprocure.push(['_customerid', 51]);"
+
+    def fake_json(url: str) -> dict:
+        if "/soldetail/" in url:
+            return {"records": [{"bidContacts": []}]}
+        return {
+            "hits": 1,
+            "records": [
+                {
+                    "bidid": 987,
+                    "bidNumber": "DOT-987",
+                    "title": "Interstate highway resurfacing",
+                    "description": "Mill and pave the roadway.",
+                    "openDate": 1786838400000,
+                    "startDate": 1782864000000,
+                    "creatorOrg": {"name": "Transportation, Dept. of"},
+                    "orgBidClassType": {"description": "Invitation for Bid"},
+                }
+            ],
+        }
+
+    result, warnings = fetch_webprocure_source(
+        config,
+        fake_html,
+        fake_json,
+        today=date(2026, 7, 22),
+        fetched_at="2026-07-22T12:00:00Z",
+    )
+
+    assert warnings == []
+    assert config.require_product_fit is False
+    assert [project["sourceRecordId"] for project in result.projects] == ["DOT-987"]
+    assert result.source["coverageField"] == "dotBidding"
+    assert result.source["recordCountUnit"] == "projects"
+
+
+def test_nhdot_advertised_feed_keeps_current_projects_and_public_plans() -> None:
+    def fake_json(url: str) -> dict:
+        assert "BID_DATE+IS+NOT+NULL" in url
+        return {
+            "features": [
+                {
+                    "attributes": {
+                        "PROJ_NUMBER": "41745",
+                        "PROJ_NAME": "Concord",
+                        "PROJ_DESCRIPTION": "Bridge deck rehabilitation",
+                        "BID_DATE": 1786752000000,
+                        "AD_DATE": 1782864000000,
+                        "PROJECT_INFO": "https://www.dot.nh.gov/projects/41745",
+                        "PROJECT_PLANS": "https://www.dot.nh.gov/sites/g/files/ehbemt811/files/41745-plans.pdf",
+                        "CONTACT_NAME": "Alex Engineer",
+                        "CONTACT_PHONE": "603-555-0100",
+                    }
+                },
+                {
+                    "attributes": {
+                        "PROJ_NUMBER": "OLD",
+                        "PROJ_NAME": "Past",
+                        "PROJ_DESCRIPTION": "Closed project",
+                        "BID_DATE": 1780272000000,
+                    }
+                },
+            ],
+            "exceededTransferLimit": False,
+        }
+
+    result = fetch_new_hampshire_bids(
+        fake_json,
+        today=date(2026, 7, 22),
+        fetched_at="2026-07-22T12:00:00Z",
+    )
+
+    assert result.source_id == NEW_HAMPSHIRE_DOT_BID_SOURCE_ID
+    assert [project["sourceRecordId"] for project in result.projects] == ["41745"]
+    assert result.projects[0]["bidDate"] == "2026-08-15"
+    assert any(
+        document["kind"] == "plans"
+        and document["access"] == "public"
+        for document in result.projects[0]["documents"]
+    )
+    assert result.source["coverageField"] == "dotBidding"
 
 
 def test_vermont_project_service_adds_published_factsheet_contact() -> None:
@@ -330,9 +425,9 @@ def test_sam_state_connector_follows_documented_pagination() -> None:
 
     assert warnings == []
     assert result is not None
-    assert len(result.projects) == 14
-    assert offsets.count(0) == 7
-    assert offsets.count(1000) == 7
+    assert len(result.projects) == len(northeast.SAM_QUERIES) * 2
+    assert offsets.count(0) == len(northeast.SAM_QUERIES)
+    assert offsets.count(1000) == len(northeast.SAM_QUERIES)
 
 
 def test_regional_merge_marks_connected_federal_partition_as_partial() -> None:

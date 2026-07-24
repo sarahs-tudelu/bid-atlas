@@ -8,11 +8,17 @@
     "deploy": "cdk deploy BidAtlasStack --require-approval never --outputs-file cdk-outputs.json"
   },
   "devDependencies": {
+    "@types/node": "22.19.19",
     "aws-cdk": "2.1132.0",
     "aws-cdk-lib": "2.261.0",
-    "@types/node": "22.19.19",
     "constructs": "10.5.0",
+    "esbuild": "^0.28.1",
     "ts-node": "10.9.2",
     "typescript": "5.9.3"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.1094.0",
+    "fflate": "^0.8.3",
+    "undici": "^8.9.0"
   }
 }

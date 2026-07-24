@@ -21,6 +21,16 @@ class SearchProfile:
     description: str
     minimum_score: int
     states: tuple[str, ...] = ()
+    products: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class ProductCategory:
+    id: str
+    label: str
+    minimum_score: int
+    patterns: tuple[WeightedPattern, ...]
+    negative_patterns: tuple[WeightedPattern, ...] = ()
 
 
 POSITIVE_PATTERNS = (
@@ -63,8 +73,34 @@ POSITIVE_PATTERNS = (
         ),
         8,
     ),
+    WeightedPattern(
+        "passenger shelter",
+        re.compile(r"\b(?:passenger|bus|transit|platform)\s+shelters?\b", re.I),
+        8,
+    ),
     WeightedPattern("pavilion", re.compile(r"\b(?:picnic|park|outdoor)?\s*pavilions?\b", re.I), 6),
     WeightedPattern("awning", re.compile(r"\bawnings?\b", re.I), 8),
+    WeightedPattern("pergola", re.compile(r"\bpergolas?\b", re.I), 10),
+    WeightedPattern(
+        "partition wall",
+        re.compile(
+            r"\b(?:interior|exterior|non[-\s]?load[-\s]?bearing|demountable|modular|movable|"
+            r"operable|folding|glass|glazed|acoustic|metal[-\s]?stud|toilet|restroom)?\s*"
+            r"partition\s+walls?\b",
+            re.I,
+        ),
+        10,
+    ),
+    WeightedPattern(
+        "architectural partition",
+        re.compile(
+            r"\b(?:interior|non[-\s]?load[-\s]?bearing|demountable|modular|movable|operable|"
+            r"folding|glass|glazed|acoustic|metal[-\s]?stud|toilet|restroom)\s+partitions?\b",
+            re.I,
+        ),
+        9,
+    ),
+    WeightedPattern("partition", re.compile(r"\bpartitions?\b", re.I), 6),
     WeightedPattern("canopy", re.compile(r"\bcanop(?:y|ies)\b", re.I), 6),
     WeightedPattern("metal fabrication", re.compile(r"\b(?:sheet\s+metal|fabricat(?:ed|ion)|prefabricated|pre-engineered)\b", re.I), 4),
     WeightedPattern("commercial construction", re.compile(r"\b(?:commercial|building|construction|renovation|repair|replacement|installation)\b", re.I), 3),
@@ -96,7 +132,75 @@ NEGATIVE_PATTERNS = (
         re.compile(r"\b(?:compressors?|generator|nsn|spare\s+parts?|replacement\s+parts?)\b", re.I),
         10,
     ),
+    WeightedPattern(
+        "non-construction partition",
+        re.compile(
+            r"\b(?:disk|drive|database|table|memory|network|political|territorial|geographic|"
+            r"chromatograph(?:y|ic)|coefficient)\s+partitions?\b|"
+            r"\bpartitions?\s+(?:table|scheme|algorithm|function|coefficient)\b",
+            re.I,
+        ),
+        14,
+    ),
 )
+
+PRODUCT_CATEGORIES = {
+    category.id: category
+    for category in (
+        ProductCategory(
+            "canopies",
+            "Canopies",
+            6,
+            (
+                WeightedPattern("metal canopy", re.compile(r"\b(?:metal|aluminum|steel|stainless|galvanized)\s+canop(?:y|ies)\b", re.I), 10),
+                WeightedPattern("architectural canopy", re.compile(r"\barchitectural\s+canop(?:y|ies)\b", re.I), 9),
+                WeightedPattern("canopy", re.compile(r"\bcanop(?:y|ies)\b", re.I), 6),
+                WeightedPattern("covered walkway", re.compile(r"\bcovered\s+walkways?\b", re.I), 9),
+                WeightedPattern("awning", re.compile(r"\bawnings?\b", re.I), 8),
+                WeightedPattern("shade structure", re.compile(r"\b(?:shade\s+structures?|sun\s*shades?)\b", re.I), 8),
+                WeightedPattern("carport", re.compile(r"\b(?:car\s*ports?|parking\s+canop(?:y|ies))\b", re.I), 8),
+                WeightedPattern("passenger shelter", re.compile(r"\b(?:passenger|bus|transit|platform)\s+shelters?\b", re.I), 8),
+                WeightedPattern("pavilion", re.compile(r"\b(?:picnic|park|outdoor)?\s*pavilions?\b", re.I), 6),
+            ),
+            NEGATIVE_PATTERNS[:5],
+        ),
+        ProductCategory(
+            "pergolas",
+            "Pergolas",
+            8,
+            (WeightedPattern("pergola", re.compile(r"\bpergolas?\b", re.I), 10),),
+        ),
+        ProductCategory(
+            "partition-walls",
+            "Partition walls",
+            6,
+            (
+                WeightedPattern(
+                    "partition wall",
+                    re.compile(
+                        r"\b(?:interior|exterior|non[-\s]?load[-\s]?bearing|demountable|modular|"
+                        r"movable|operable|folding|glass|glazed|acoustic|metal[-\s]?stud|toilet|"
+                        r"restroom)?\s*partition\s+walls?\b",
+                        re.I,
+                    ),
+                    10,
+                ),
+                WeightedPattern(
+                    "architectural partition",
+                    re.compile(
+                        r"\b(?:interior|non[-\s]?load[-\s]?bearing|demountable|modular|movable|"
+                        r"operable|folding|glass|glazed|acoustic|metal[-\s]?stud|toilet|restroom)"
+                        r"\s+partitions?\b",
+                        re.I,
+                    ),
+                    9,
+                ),
+                WeightedPattern("partition", re.compile(r"\bpartitions?\b", re.I), 6),
+            ),
+            (NEGATIVE_PATTERNS[-1],),
+        ),
+    )
+}
 
 NAICS_BOOSTS = {
     "236220": 4,
@@ -112,13 +216,15 @@ NAICS_BOOSTS = {
 SEARCH_PROFILES = {
     profile.id: profile
     for profile in (
-        SearchProfile("direct_national", "Direct canopy - Nationwide", "High-fit canopy, awning, shelter, and covered-walkway work across all 50 states and D.C.", 8, US_STATES_AND_DC),
-        SearchProfile("direct_northeast", "Direct canopy - Northeast", "High-fit canopy, awning, shelter, and covered-walkway work across the Northeast.", 8, NORTHEAST_STATES),
-        SearchProfile("high_fit_canopy", "Highest canopy fit", "Direct architectural metal canopy and covered-walkway opportunities.", 12),
+        SearchProfile("direct_national", "Direct products - Nationwide", "High-fit canopy, pergola, and partition-wall work across all 50 states and D.C.", 8, US_STATES_AND_DC),
+        SearchProfile("direct_northeast", "Direct products - Northeast", "High-fit canopy, pergola, and partition-wall work across the Northeast.", 8, NORTHEAST_STATES),
+        SearchProfile("high_fit_canopy", "Highest canopy fit", "Direct architectural metal canopy and covered-walkway opportunities.", 12, products=("canopies",)),
         SearchProfile("entrance_facade", "Entrance and facade", "Hidden canopy scope inside entrance, vestibule, facade, and exterior renovations.", 6),
-        SearchProfile("transit_shelters", "Transit shelters", "Passenger shelters, station canopies, and covered platforms.", 6),
-        SearchProfile("loading_dock", "Loading dock and industrial", "Dock covers, warehouse entrances, and service-yard canopy work.", 5),
-        SearchProfile("shade_structures", "Shade structures", "Pavilions, pergolas, sunshades, and outdoor shelter opportunities.", 6),
+        SearchProfile("transit_shelters", "Transit shelters", "Passenger shelters, station canopies, and covered platforms.", 6, products=("canopies",)),
+        SearchProfile("loading_dock", "Loading dock and industrial", "Dock covers, warehouse entrances, and service-yard canopy work.", 5, products=("canopies",)),
+        SearchProfile("shade_structures", "Shade structures", "Pavilions, pergolas, sunshades, and outdoor shelter opportunities.", 6, products=("canopies", "pergolas")),
+        SearchProfile("pergolas", "Pergolas", "Pergola construction, replacement, and renovation opportunities.", 8, products=("pergolas",)),
+        SearchProfile("partition_walls", "Partition walls", "Interior, demountable, operable, glass, acoustic, and restroom partition work.", 6, products=("partition-walls",)),
     )
 }
 
@@ -147,7 +253,7 @@ def score_text(title: str, searchable_text: str, naics_code: str = "") -> tuple[
     return score, matched
 
 
-def score_project(project: dict[str, Any]) -> dict[str, Any]:
+def _project_text(project: dict[str, Any]) -> tuple[str, str]:
     title = str(project.get("title") or "")
     fields = [
         title,
@@ -157,7 +263,60 @@ def score_project(project: dict[str, Any]) -> dict[str, Any]:
         *(project.get("searchableFields") or []),
         *(document.get("name") for document in project.get("documents", [])),
     ]
-    searchable = " ".join(str(value) for value in fields if value)
+    return title, " ".join(str(value) for value in fields if value)
+
+
+def _category_score(
+    title: str,
+    searchable_text: str,
+    category: ProductCategory,
+) -> tuple[int, list[str]]:
+    score = 0
+    reasons: list[str] = []
+    for weighted in category.patterns:
+        if weighted.pattern.search(title):
+            score += weighted.weight * 2
+            reasons.append(f"{weighted.label}:title")
+        elif weighted.pattern.search(searchable_text):
+            score += weighted.weight
+            reasons.append(weighted.label)
+    for weighted in category.negative_patterns:
+        if weighted.pattern.search(title):
+            score -= weighted.weight * 2
+            reasons.append(f"-{weighted.label}:title")
+        elif weighted.pattern.search(searchable_text):
+            score -= weighted.weight
+            reasons.append(f"-{weighted.label}")
+    return score, reasons
+
+
+def project_product_matches(project: dict[str, Any]) -> list[dict[str, Any]]:
+    title, searchable = _project_text(project)
+    matches: list[dict[str, Any]] = []
+    for category in PRODUCT_CATEGORIES.values():
+        score, reasons = _category_score(title, searchable, category)
+        if score < category.minimum_score:
+            continue
+        matches.append(
+            {
+                "id": category.id,
+                "label": category.label,
+                "score": score,
+                "reasons": reasons[:4],
+            }
+        )
+    return sorted(matches, key=lambda match: (-int(match["score"]), str(match["label"])))
+
+
+def product_matches(project: dict[str, Any], product: str) -> bool:
+    requested = product.strip().casefold()
+    if not requested or requested == "all":
+        return True
+    return any(match["id"] == requested for match in project_product_matches(project))
+
+
+def score_project(project: dict[str, Any]) -> dict[str, Any]:
+    title, searchable = _project_text(project)
     score, reasons = score_text(title, searchable, str(project.get("naicsCode") or ""))
     if score >= 15:
         band = "high"
@@ -170,7 +329,15 @@ def score_project(project: dict[str, Any]) -> dict[str, Any]:
 
 def profile_matches(project: dict[str, Any], profile: SearchProfile, fit: dict[str, Any]) -> bool:
     state = str(project.get("state") or "").upper()
-    return fit["score"] >= profile.minimum_score and (not profile.states or state in profile.states)
+    matches_product = (
+        not profile.products
+        or any(product_matches(project, product) for product in profile.products)
+    )
+    return (
+        fit["score"] >= profile.minimum_score
+        and (not profile.states or state in profile.states)
+        and matches_product
+    )
 
 
 def search_profile_payload() -> list[dict[str, Any]]:
@@ -181,6 +348,7 @@ def search_profile_payload() -> list[dict[str, Any]]:
             "description": profile.description,
             "minimumScore": profile.minimum_score,
             "states": list(profile.states),
+            "products": list(profile.products),
         }
         for profile in SEARCH_PROFILES.values()
     ]

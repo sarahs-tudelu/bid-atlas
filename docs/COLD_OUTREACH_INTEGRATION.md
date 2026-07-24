@@ -7,7 +7,7 @@ This document is the operating contract for BidAtlas marketing email. Read it wi
 The ignored `tudelu-cold-outreach-main/` repository was treated as a reference implementation. BidAtlas reimplements these policies:
 
 - the default cold-outreach mailbox is `outreach@tudelugroup.com`;
-- the prospect-facing identity is **Alex Turner**, with **Alex** as the signoff;
+- the default prospect-facing identity is **Alex Turner**, with **Alex** as the signoff;
 - the marketing identity is separate from the employee who owns a sales response;
 - human responses are forwarded with the prospect as Reply-To;
 - automatic replies are suppressed;
@@ -22,10 +22,10 @@ Marketing is the default `senderMode` returned by `GET /api/outreach/config` and
 
 | Mode | Visible sender/signature | Delivery provider | Response destination |
 | --- | --- | --- | --- |
-| `marketing` | Alex Turner, `outreach@tudelugroup.com` | Connected Instantly account | Selected designated Tudelu sales owner |
+| `marketing` | Selected provider-authorized Tudelu marketing account; defaults to Alex Turner, `outreach@tudelugroup.com` | Connected Instantly account | Selected designated Tudelu sales owner |
 | `employee` | Verified signed-in Tudelu employee | Gmail `users/me` | The employee's own mailbox |
 
-The server, not React, owns these identities. A client cannot substitute another marketing sender or an arbitrary reply address. Current designated sales owners are:
+The server, not React, authorizes these identities. `GET /api/outreach/config` returns only safe identity/status fields for the accounts visible to the server-held Instantly token. Generation and send revalidate a selected nondefault address against that provider account list, so a client cannot invent a marketing sender or arbitrary reply address. Current designated sales owners are:
 
 - Jadalyn Gaines — `jadalyn.gaines@tudelu.com`
 - Patrick May — `patrick.may@tudelu.com`
@@ -39,18 +39,18 @@ When the signed-in user is one of these owners, that employee is preselected. Ot
 
 ## Drafting and personalization
 
-Initial generation is deterministic and makes no Anthropic call. Marketing mode always signs as Alex; employee mode signs as the verified employee. **Personalize with AI** is optional and sends Claude only bounded project facts and minimized prior-message snippets. FastAPI discards any model-supplied signature and appends the correct server-owned Tudelu signature.
+Initial generation is deterministic and makes no Anthropic call. Marketing mode signs with the server-resolved selected account persona; employee mode signs as the verified employee. **Personalize with AI** is optional and sends Claude only bounded project facts and minimized prior-message snippets. FastAPI discards any model-supplied signature and appends the correct server-owned Tudelu signature.
 
-Changing sender mode regenerates the draft so the displayed signature cannot drift from the enforced provider identity. Save and send reload the admitted project and reject any recipient that is not a valid email published by the source.
+Changing sender mode or marketing account regenerates the draft so the displayed signature cannot drift from the enforced provider identity. Save and send reload the admitted project and reject any recipient that is not a valid email published by the source.
 
 ## Send controls
 
-Marketing send uses the Instantly email endpoint with the configured `eaccount`. After provider success, BidAtlas stores:
+Marketing send uses the Instantly email endpoint with the configured `eaccount`. Provider requests identify the server as `BidAtlas/1.0` instead of exposing Python's default `urllib` browser signature, which Instantly's Cloudflare boundary rejects. After provider success, BidAtlas stores:
 
 - the normalized recipient and a hash-keyed route;
 - project ID/title;
 - employee who confirmed the send;
-- fixed marketing sender;
+- provider-authorized marketing sender;
 - selected sales reply owner; and
 - send timestamp.
 
@@ -63,10 +63,10 @@ Employee sends retain the existing per-user/per-project conditional lock and Gma
 EventBridge runs `app.jobs.sync_marketing_replies.handler` every five minutes:
 
 1. Exit without calling Instantly when no BidAtlas marketing routes exist.
-2. Poll received messages for the configured marketing account over a bounded 30-day window and at most five 100-item pages.
+2. Group routes by their recorded marketing sender and poll each applicable account over a bounded 30-day window and at most five 100-item pages.
 3. Match a message to a route only when its sender equals the route recipient and its provider timestamp is at or after the recorded send.
 4. Suppress provider-marked automatic replies and deterministic out-of-office/automatic-reply subjects or previews.
-5. Forward a human response to that route's designated sales owner, set Reply-To to the original prospect, and include the original content through the provider.
+5. Forward a human response through the route's original sender account to that route's designated sales owner, set Reply-To to the original prospect, and include the original content through the provider.
 6. Store a hash-keyed audit with a bounded snippet and provider ID. A successful or suppressed provider ID is not handled twice. A `forward-failed` record is eligible for retry.
 
 This is response routing, not CRM creation. BidAtlas currently has no CRM mutation boundary.
@@ -79,15 +79,16 @@ Production uses the existing SSM SecureString `/tudelu-marketing/INSTANTLY_API_T
 - the reply-sync Lambda reads it for received-message polling and forwarding; and
 - no browser response, log statement, stack output, or CloudFormation property contains the token value.
 
-`BIDATLAS_MARKETING_SENDER` defaults to `outreach@tudelugroup.com`. Changing it requires confirming that the account is connected in Instantly, then updating configuration, tests, and this document together.
+`BIDATLAS_MARKETING_SENDER` defaults to `outreach@tudelugroup.com`. It controls the fallback/default, while the remaining selectable identities are discovered from Instantly. Changing the default requires confirming that the account is connected in Instantly, then updating configuration, tests, and this document together.
 
 ## Release verification
 
 Automated release checks cover:
 
-- marketing defaults and Alex signature;
-- server-enforced sender and sales owner;
-- designated Instantly account in the provider request;
+- marketing defaults, account discovery, and selected-account signature;
+- server-enforced provider-authorized sender and sales owner;
+- selected Instantly account in the provider request;
+- explicit BidAtlas provider-request identity;
 - 14-day cooldown;
 - employee Gmail selection and employee response ownership;
 - human-reply forwarding; and
