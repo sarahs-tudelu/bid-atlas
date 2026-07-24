@@ -70,7 +70,7 @@ export class BidAtlasStack extends cdk.Stack {
       runtime: lambda.Runtime.PYTHON_3_12,
       architecture: lambda.Architecture.X86_64,
       handler: "app.main.handler",
-      memorySize: 1024,
+      memorySize: 2048,
       timeout: cdk.Duration.seconds(29),
       logGroup: new logs.LogGroup(this, "ApiLogGroup", {
         retention: logs.RetentionDays.ONE_WEEK,
@@ -168,7 +168,7 @@ export class BidAtlasStack extends cdk.Stack {
       runtime: lambda.Runtime.PYTHON_3_12,
       architecture: lambda.Architecture.X86_64,
       handler: "app.jobs.refresh_national.handler",
-      memorySize: 1024,
+      memorySize: 2048,
       timeout: cdk.Duration.minutes(15),
       logGroup: new logs.LogGroup(this, "NationalRefreshLogGroup", {
         retention: logs.RetentionDays.ONE_WEEK,
@@ -359,7 +359,7 @@ export class BidAtlasStack extends cdk.Stack {
         runtime: lambda.Runtime.PYTHON_3_12,
         architecture: lambda.Architecture.X86_64,
         handler: "app.jobs.sync_gmail_inboxes.handler",
-        memorySize: 1024,
+        memorySize: 2048,
         timeout: cdk.Duration.minutes(5),
         logGroup: new logs.LogGroup(this, "GmailInboxSyncLogGroup", {
           retention: logs.RetentionDays.ONE_WEEK,

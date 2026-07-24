@@ -70,17 +70,36 @@ def published_phone_contacts(project: dict[str, Any]) -> list[dict[str, str]]:
     return contacts
 
 
+def has_published_contact(project: dict[str, Any]) -> bool:
+    """Return whether the source published a usable email address or phone number."""
+
+    return bool(published_contacts(project) or published_phone_contacts(project))
+
+
+def contact_research_status(project: dict[str, Any]) -> str:
+    """Classify whether outreach can start or contact research is still needed."""
+
+    return "published-contact" if has_published_contact(project) else "research-needed"
+
+
+def is_product_project(
+    project: dict[str, Any],
+    fit: dict[str, Any] | None = None,
+) -> bool:
+    """Apply the product-fit visibility gate without requiring a published contact."""
+
+    product_fit = fit or score_project(project)
+    return int(product_fit["score"]) >= MINIMUM_PRODUCT_SCORE
+
+
 def is_contactable_product_project(
     project: dict[str, Any],
     fit: dict[str, Any] | None = None,
 ) -> bool:
-    """Apply the visibility gate for actionable Tudelu product opportunities."""
+    """Return whether a product-qualified project also has a published contact."""
 
     product_fit = fit or score_project(project)
-    has_published_contact = bool(
-        published_contacts(project) or published_phone_contacts(project)
-    )
-    return int(product_fit["score"]) >= MINIMUM_PRODUCT_SCORE and has_published_contact
+    return is_product_project(project, product_fit) and has_published_contact(project)
 
 
 def is_contactable_canopy_project(

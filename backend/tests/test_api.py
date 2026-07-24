@@ -3,7 +3,7 @@ from fastapi.testclient import TestClient
 from backend.app.api.auth import require_user
 from backend.app.dependencies import get_workspace_store
 from backend.app.main import app
-from backend.app.services.qualification import is_contactable_canopy_project
+from backend.app.services.qualification import is_product_project
 
 
 TEST_USER = {"email": "tester@tudelu.com", "name": "Test User", "picture": "", "gmailConnected": True}
@@ -62,7 +62,11 @@ def test_new_jersey_catalog_is_connected_and_searchable() -> None:
     body = search_response.json()
     assert body["meta"]["matchedProjects"] <= new_jersey["loadedProjects"]
     assert all(project["state"] == "NJ" for project in body["projects"])
-    assert all(is_contactable_canopy_project(project) for project in body["projects"])
+    assert all(is_product_project(project) for project in body["projects"])
+    assert all(
+        project["contactStatus"] in {"published-contact", "research-needed"}
+        for project in body["projects"]
+    )
 
 
 def test_workspace_draft_round_trip() -> None:

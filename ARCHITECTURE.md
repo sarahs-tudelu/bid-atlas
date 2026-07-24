@@ -99,23 +99,33 @@ The checked-in `data-export/current-projects.json` is a reproducible deployment 
 
 1. constructs a catalog from the packaged snapshot;
 2. checks the S3 ETag no more than once per configured refresh interval;
-3. downloads a changed object under a strict byte limit;
+3. downloads a changed object under the enforced 80,000,000-byte limit;
 4. atomically replaces the in-memory immutable catalog;
 5. retains the current catalog if S3 is unavailable or invalid.
 
-`ProjectCatalog` repairs known legacy text encoding, records the raw snapshot count, applies the visibility admission gate once during initialization, builds exact-ID indexes only from admitted projects, and then serves all list/search/aggregation operations from that admitted list.
+`ProjectCatalog` repairs known legacy text encoding, records the raw snapshot count, merges conservative cross-source duplicates, applies the product-fit visibility gate once during initialization, derives `published-contact` or `research-needed` status for every admitted project, builds exact-ID and merged-alias indexes only from admitted projects, and then serves all list/search/aggregation operations from that admitted list.
+
+The data-only archive importer validates complete-source manifests and page checksums, scores every non-terminal row, and stores a compact website projection for qualified records. It removes redundant crawler search arrays and generic early-stage document wrappers while retaining visible project facts, official source URLs, useful named participants, cached fit/classification evidence, and bid/drawing document routes. Package-level import provenance and contact-status counts live once at the snapshot root. The API, national refresh, and Gmail inbox-sync Lambdas use 2 GB memory so the bounded expanded catalog can be parsed without approaching the runtime ceiling.
 
 ### Qualification invariant
 
 ```text
 visible(project) = product_score(project) >= 8
-                   AND (count(valid_source_published_email(project)) > 0
-                        OR count(valid_source_published_phone(project)) > 0)
+
+contact_status(project) = published-contact
+                          when a valid source-published email or phone exists
+                          otherwise research-needed
 ```
 
-`services/qualification.py` owns this invariant. The scorer preserves the `canopyFit` response field for compatibility while classifying explicit `productTypes`/`productMatches` for canopies, pergolas, and partition walls. No route should duplicate or weaken the invariant. A new catalog surface must operate on `ProjectCatalog.projects` or explicitly call the same predicate.
+`services/qualification.py` owns these invariants. The scorer preserves the `canopyFit` response field for compatibility while classifying explicit `productTypes`/`productMatches` for canopies, pergolas, and partition walls. No route should duplicate or weaken the visibility invariant. Email and call actions remain restricted to literal source-published contact evidence. A new catalog surface must operate on `ProjectCatalog.projects` or explicitly call the same predicate.
 
 The dashboard recomputes visible total/stage/company inventory. `/api/coverage` intentionally returns the raw ingestion inventory to measure connectors. Search metadata exposes raw and qualified counts so the difference remains observable.
+
+### Duplicate-merging invariant
+
+Duplicate merging is a read-model operation, not destructive source partitioning. `services/project_merge.py` never matches two rows from the same source. Cross-source candidates are blocked by normalized official identifier, address, substantive title, locality, and date, then accepted only with corroborating evidence. Conflicting published addresses prevent a title-only merge. The canonical result preserves every original ID and official URL in `sourceRecords`, and the project index maps each alias back to that canonical result.
+
+The S3 snapshot retains raw source rows because scheduled refreshes replace or retain source partitions independently. Persistently collapsing those rows would make later source-specific refreshes capable of deleting another publisher’s evidence. The API therefore reports both raw and merged counts.
 
 Search and dashboard results use a stable drawing-readiness priority after the requested relevance/readiness sort. A project is drawing-ready only when an official document is classified as plans/drawings, is marked `open` or `public`, and has an HTTPS route. Project and document responses expose that result without treating account-gated plan systems as publicly accessible.
 
@@ -250,7 +260,8 @@ The UI gate is a usability boundary; the FastAPI dependency is the authorization
 | `services/outreach.py` | sender-aware deterministic draft and delivery-field validation |
 | `services/ai_outreach.py` | SAM-style Anthropic prompt, bounded context, response validation, fixed Tudelu signature |
 | `services/runtime_secrets.py` | lazy cached SSM decryption |
-| `services/qualification.py` | global visibility and published contacts |
+| `services/qualification.py` | product visibility, published contacts, and research-needed status |
+| `services/project_merge.py` | conservative cross-source entity resolution and provenance preservation |
 | `services/catalog.py` | catalog admission, filters, sort, paging, aggregates |
 | `services/canopy.py` | deterministic fit model, product classification, and profiles |
 | `services/geography.py` | canonical 50-state/D.C. partition set |

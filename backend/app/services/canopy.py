@@ -291,6 +291,16 @@ def _category_score(
 
 
 def project_product_matches(project: dict[str, Any]) -> list[dict[str, Any]]:
+    cached = project.get("productMatches")
+    if isinstance(cached, list) and all(
+        isinstance(match, dict)
+        and isinstance(match.get("id"), str)
+        and isinstance(match.get("label"), str)
+        and isinstance(match.get("score"), int)
+        and isinstance(match.get("reasons"), list)
+        for match in cached
+    ):
+        return cached
     title, searchable = _project_text(project)
     matches: list[dict[str, Any]] = []
     for category in PRODUCT_CATEGORIES.values():
@@ -316,6 +326,14 @@ def product_matches(project: dict[str, Any], product: str) -> bool:
 
 
 def score_project(project: dict[str, Any]) -> dict[str, Any]:
+    cached = project.get("canopyFit")
+    if (
+        isinstance(cached, dict)
+        and isinstance(cached.get("score"), int)
+        and cached.get("band") in {"high", "possible", "low"}
+        and isinstance(cached.get("reasons"), list)
+    ):
+        return cached
     title, searchable = _project_text(project)
     score, reasons = score_text(title, searchable, str(project.get("naicsCode") or ""))
     if score >= 15:

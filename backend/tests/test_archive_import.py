@@ -83,7 +83,7 @@ def _write_archive(tmp_path: Path) -> Path:
     return archive
 
 
-def test_archive_import_keeps_only_current_contactable_product_projects(
+def test_archive_import_keeps_product_projects_and_flags_missing_contacts(
     tmp_path: Path,
 ) -> None:
     projects, audit = qualifying_projects(
@@ -92,11 +92,18 @@ def test_archive_import_keeps_only_current_contactable_product_projects(
     )
 
     assert [project["id"] for project in projects] == [
+        "test-current-source:no-contact",
         "test-current-source:qualifying"
     ]
-    assert projects[0]["archiveImport"]["scanScope"] == "current"
+    by_id = {project["id"]: project for project in projects}
+    assert by_id["test-current-source:qualifying"]["contactStatus"] == "published-contact"
+    assert by_id["test-current-source:no-contact"]["contactStatus"] == "research-needed"
+    assert projects[0]["canopyFit"]["score"] >= 8
+    assert "searchableFields" not in projects[0]
     assert audit["scannedRows"] == 3
-    assert audit["qualifiedProjects"] == 1
+    assert audit["qualifiedProjects"] == 2
+    assert audit["publishedContactProjects"] == 1
+    assert audit["researchNeededProjects"] == 1
 
 
 def test_archive_merge_is_idempotent_and_refreshes_aggregates() -> None:

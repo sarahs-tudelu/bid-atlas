@@ -225,12 +225,23 @@ export interface Project {
   sourceUrl: string;
   documents?: ProjectDocument[];
   participants?: ProjectParticipant[];
+  contactStatus?: "published-contact" | "research-needed";
   documentTextIndexed?: boolean;
   hasAccessibleDrawings?: boolean;
   accessibleDrawingCount?: number;
   canopyFit?: CanopyFit;
   productTypes?: ProductType[];
   productMatches?: ProductMatch[];
+  sourceRecords?: Array<{
+    id?: string;
+    sourceId?: string;
+    sourceRecordId?: string;
+    sourceName?: string;
+    sourceUrl?: string;
+    updatedAt?: string;
+  }>;
+  duplicateProjectIds?: string[];
+  duplicateSourceCount?: number;
 }
 
 export interface PageMeta {
@@ -244,6 +255,8 @@ export interface PageMeta {
   sourceMode?: string;
   warnings?: string[];
   accessibleDrawingProjects?: number;
+  mergedSourceProjectCount?: number;
+  duplicateRowsMerged?: number;
 }
 
 export interface SearchResponse {
@@ -283,9 +296,12 @@ export interface CoverageResponse {
     totalProjects: number;
     stageCounts: Record<string, number>;
     stateCounts: Record<string, number>;
+    contactStatusCounts?: Record<"published-contact" | "research-needed", number>;
     contractorOrganizations: number;
     refreshedAt: string;
     sourceProjectCount?: number;
+    mergedSourceProjectCount?: number;
+    duplicateRowsMerged?: number;
   };
   sources: Source[];
   warnings: string[];

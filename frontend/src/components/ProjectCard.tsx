@@ -21,6 +21,8 @@ export function ProjectCard({ project, returnTo }: { project: Project; returnTo?
   const workspaceHref = projectWorkspaceHref(project.id, returnTo);
   const emailContact = emailContacts(project)[0];
   const phoneContact = phoneContacts(project)[0];
+  const needsContactResearch =
+    project.contactStatus === "research-needed" || (!emailContact && !phoneContact);
 
   return (
     <article className="project-card">
@@ -40,6 +42,22 @@ export function ProjectCard({ project, returnTo }: { project: Project; returnTo?
           {project.hasAccessibleDrawings ? (
             <span className="drawing-badge">
               Drawings available
+            </span>
+          ) : null}
+          {needsContactResearch ? (
+            <span
+              className="research-badge"
+              title="The source did not publish a usable email address or phone number."
+            >
+              Research needed
+            </span>
+          ) : null}
+          {(project.duplicateSourceCount ?? 0) > 1 ? (
+            <span
+              className="merged-badge"
+              title="BidAtlas matched multiple official database records to this project."
+            >
+              {project.duplicateSourceCount} sources merged
             </span>
           ) : null}
         </div>

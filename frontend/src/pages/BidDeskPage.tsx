@@ -135,6 +135,9 @@ export function BidDeskPage() {
   const deadline = useMemo(() => describeDeadline(project?.bidDate), [project?.bidDate]);
   const emailContact = project ? emailContacts(project)[0] : undefined;
   const phoneContact = project ? phoneContacts(project)[0] : undefined;
+  const needsContactResearch =
+    project?.contactStatus === "research-needed" ||
+    Boolean(project && !emailContact && !phoneContact);
 
   if (!projectId) {
     return (
@@ -224,6 +227,25 @@ export function BidDeskPage() {
                   </div>
                 </dl>
 
+                {(project.sourceRecords?.length ?? 0) > 1 ? (
+                  <>
+                    <h3>Merged source records</h3>
+                    <ul>
+                      {project.sourceRecords?.map((record) => (
+                        <li className="evidence-contact" key={record.id ?? record.sourceUrl}>
+                          <strong>{record.sourceName || record.sourceId || "Official source"}</strong>
+                          <span>{record.sourceRecordId || record.id || "Source record"}</span>
+                          {record.sourceUrl ? (
+                            <a href={record.sourceUrl} target="_blank" rel="noreferrer">
+                              Verify record ↗
+                            </a>
+                          ) : null}
+                        </li>
+                      ))}
+                    </ul>
+                  </>
+                ) : null}
+
                 {project.canopyFit ? (
                   <>
                     <h3>Product fit reasoning</h3>
@@ -271,6 +293,12 @@ export function BidDeskPage() {
                 )}
 
                 <h3>Published contacts</h3>
+                {needsContactResearch ? (
+                  <div className="research-callout">
+                    <strong>Contact research needed</strong>
+                    <span>The source did not publish a usable email address or phone number.</span>
+                  </div>
+                ) : null}
                 {project.participants?.length ? (
                   <ul>
                     {project.participants.map((participant, index) => (

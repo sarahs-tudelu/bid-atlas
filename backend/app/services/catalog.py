@@ -17,7 +17,8 @@ from .canopy import (
     score_project,
 )
 from .document_access import accessible_drawing_documents, has_accessible_drawings
-from .qualification import is_contactable_product_project
+from .project_merge import merge_duplicate_projects
+from .qualification import contact_research_status, is_product_project
 
 
 ARCHIVED_STAGES = {"completed", "cancelled"}
@@ -109,6 +110,16 @@ def _project_text(project: dict[str, Any]) -> str:
         project.get("state"),
         project.get("postalCode"),
         project.get("sourceName"),
+        *(
+            value
+            for participant in project.get("participants", [])
+            for value in (
+                participant.get("name"),
+                participant.get("organization"),
+                participant.get("email"),
+                participant.get("phone"),
+            )
+        ),
         *searchable,
     )
     return " ".join(str(field) for field in fields if field).casefold()
@@ -136,17 +147,31 @@ class ProjectCatalog:
         self.generated_at: str = snapshot["generatedAt"]
         source_projects: list[dict[str, Any]] = snapshot.get("projects", [])
         self.source_project_count = len(source_projects)
+        merged_source_projects, self.duplicate_merge_audit = merge_duplicate_projects(
+            source_projects
+        )
+        self.merged_source_project_count = len(merged_source_projects)
         self.projects = [
             project
-            for project in source_projects
-            if is_contactable_product_project(project)
+            for project in merged_source_projects
+            if is_product_project(project)
         ]
         self.sources: list[dict[str, Any]] = snapshot.get("sources", [])
         self.coverage: dict[str, Any] = snapshot.get("coverage", {})
         self.inventory: dict[str, Any] = snapshot.get("inventory", {})
         self.warnings: list[str] = snapshot.get("warnings", [])
         self.source_registry: dict[str, Any] = registry
-        self._projects_by_id = {project["id"]: project for project in self.projects}
+        self._projects_by_id: dict[str, dict[str, Any]] = {}
+        for project in self.projects:
+            for project_id in {
+                str(project["id"]),
+                *(
+                    str(alias)
+                    for alias in project.get("duplicateProjectIds") or []
+                    if alias
+                ),
+            }:
+                self._projects_by_id[project_id] = project
         self._state_codes = {
             state.get("name", "").casefold(): state.get("code", "")
             for state in self.coverage.get("states", [])
@@ -175,10 +200,15 @@ class ProjectCatalog:
 
     def _qualified_inventory(self) -> dict[str, Any]:
         stage_counts: dict[str, int] = {}
+        contact_status_counts: dict[str, int] = {}
         organizations: set[str] = set()
         for project in self.projects:
             stage = str(project.get("stage") or "unclassified")
             stage_counts[stage] = stage_counts.get(stage, 0) + 1
+            contact_status = contact_research_status(project)
+            contact_status_counts[contact_status] = (
+                contact_status_counts.get(contact_status, 0) + 1
+            )
             for participant in project.get("participants", []):
                 organization = str(participant.get("organization") or "").strip()
                 if organization:
@@ -187,8 +217,11 @@ class ProjectCatalog:
             **self.inventory,
             "totalProjects": len(self.projects),
             "stageCounts": stage_counts,
+            "contactStatusCounts": contact_status_counts,
             "contractorOrganizations": len(organizations),
             "sourceProjectCount": self.source_project_count,
+            "mergedSourceProjectCount": self.merged_source_project_count,
+            "duplicateRowsMerged": self.duplicate_merge_audit["duplicateRowsMerged"],
         }
 
     def project(self, project_id: str) -> dict[str, Any] | None:
@@ -223,6 +256,7 @@ class ProjectCatalog:
                 {
                     **project,
                     "canopyFit": fit,
+                    "contactStatus": contact_research_status(project),
                     "hasAccessibleDrawings": has_accessible_drawings(project),
                     "accessibleDrawingCount": len(
                         accessible_drawing_documents(project)
@@ -264,6 +298,10 @@ class ProjectCatalog:
                 "snapshotGeneratedAt": self.generated_at,
                 "sourceMode": "aws-snapshot",
                 "sourceProjectCount": self.source_project_count,
+                "mergedSourceProjectCount": self.merged_source_project_count,
+                "duplicateRowsMerged": self.duplicate_merge_audit[
+                    "duplicateRowsMerged"
+                ],
                 "qualifiedProjectCount": len(self.projects),
                 "nationallyComplete": bool(self.coverage.get("nationallyComplete", False)),
                 "warnings": self.warnings,
@@ -280,6 +318,7 @@ class ProjectCatalog:
         return {
             **project,
             "canopyFit": score_project(project),
+            "contactStatus": contact_research_status(project),
             "hasAccessibleDrawings": has_accessible_drawings(project),
             "accessibleDrawingCount": len(accessible_drawing_documents(project)),
             "productTypes": [match["id"] for match in matches],

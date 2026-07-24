@@ -21,6 +21,8 @@ def meta(catalog: ProjectCatalog = Depends(get_catalog)) -> dict:
         "generatedAt": catalog.generated_at,
         "projectCount": len(catalog.projects),
         "sourceProjectCount": catalog.source_project_count,
+        "mergedSourceProjectCount": catalog.merged_source_project_count,
+        "duplicateRowsMerged": catalog.duplicate_merge_audit["duplicateRowsMerged"],
         "sourceCount": len(catalog.sources),
         "nationallyComplete": bool(catalog.coverage.get("nationallyComplete", False)),
         "statesAndDistrict": int(catalog.coverage.get("statesAndDistrict", 0)),

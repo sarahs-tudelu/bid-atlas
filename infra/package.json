@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "typecheck": "tsc --noEmit",
+    "test": "node --test tests/*.test.cjs",
     "synth": "cdk synth",
     "deploy": "cdk deploy BidAtlasStack --require-approval never --outputs-file cdk-outputs.json"
   },

@@ -156,8 +156,18 @@ export function mergeFeed(snapshot: JsonRecord, feed: JsonRecord): JsonRecord {
       )
       .map((source: JsonRecord) => String(source.id)),
   );
+  const completelyRefreshedSourceIds = new Set(
+    freshSources
+      .filter(
+        (source: JsonRecord) =>
+          refreshedSourceIds.has(String(source.id))
+          && source.snapshotComplete !== false,
+      )
+      .map((source: JsonRecord) => String(source.id)),
+  );
   const retainedProjects = (snapshot.projects ?? []).filter(
-    (project: JsonRecord) => !refreshedSourceIds.has(String(project.sourceId)),
+    (project: JsonRecord) =>
+      !completelyRefreshedSourceIds.has(String(project.sourceId)),
   );
   const freshProjects = (feed.projects ?? []).filter(
     (project: JsonRecord) => refreshedSourceIds.has(String(project.sourceId)),
@@ -176,6 +186,21 @@ export function mergeFeed(snapshot: JsonRecord, feed: JsonRecord): JsonRecord {
     ...freshSources.filter((source: JsonRecord) => refreshedSourceIds.has(String(source.id))),
   ]) {
     sourcesById.set(String(source.id), source);
+  }
+  const mergedProjectCounts = new Map<string, number>();
+  for (const project of projectsById.values()) {
+    const sourceId = String(project.sourceId ?? "");
+    mergedProjectCounts.set(sourceId, (mergedProjectCounts.get(sourceId) ?? 0) + 1);
+  }
+  for (const sourceId of refreshedSourceIds) {
+    const source = sourcesById.get(sourceId);
+    if (!source || source.snapshotComplete !== false) continue;
+    const retainedCount = mergedProjectCounts.get(sourceId) ?? 0;
+    const baseNote = String(source.note ?? "")
+      .split(" Partial refresh retained previously loaded records;")[0]
+      .trim();
+    source.loadedCount = retainedCount;
+    source.note = `${baseNote} Partial refresh retained previously loaded records; ${retainedCount.toLocaleString("en-US")} projects are available in the catalog.`.trim();
   }
 
   const warningPrefixes = freshSources.map((source: JsonRecord) => `${source.name}:`);

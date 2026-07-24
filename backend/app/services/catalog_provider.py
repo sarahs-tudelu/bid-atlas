@@ -9,7 +9,7 @@ from typing import Any, Protocol
 from .catalog import ProjectCatalog
 
 
-MAX_CATALOG_BYTES = 20_000_000
+MAX_CATALOG_BYTES = 80_000_000
 
 
 class S3CatalogClient(Protocol):

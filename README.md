@@ -1,6 +1,6 @@
 # BidAtlas
 
-BidAtlas is Tudelu’s construction-opportunity workspace. It collects source-backed public projects, ranks canopy, pergola, and partition-wall potential, admits only opportunities with a published contact, and lets a verified Tudelu user review and send outreach. Reviewed emails default to the designated `outreach@tudelugroup.com` marketing mailbox, while an employee can explicitly switch to their own Tudelu Gmail account. A project correspondence inbox then organizes each employee’s Gmail sends and replies and privately files matched attachments with the correct project.
+BidAtlas is Tudelu’s construction-opportunity workspace. It collects source-backed public projects, ranks canopy, pergola, and partition-wall potential, admits product-qualified opportunities, and flags records without a published contact as `Research needed`. A verified Tudelu user can review every qualified project and send outreach only when the source published a usable email address. Reviewed emails default to the designated `outreach@tudelugroup.com` marketing mailbox, while an employee can explicitly switch to their own Tudelu Gmail account. A project correspondence inbox then organizes each employee’s Gmail sends and replies and privately files matched attachments with the correct project.
 
 - Production: <https://d9ubnak81sn3g.cloudfront.net>
 - API documentation: <https://d9ubnak81sn3g.cloudfront.net/api/docs>
@@ -23,12 +23,15 @@ Official state pages / public bid boards / ArcGIS / SAM.gov Opportunities API
   -> Regional board adapters run alongside a rate-efficient nationwide SAM query batch
   -> SAM results are partitioned locally into 51 independent state/D.C. source results
   -> Each successful source partition is normalized and replaced
+  -> Incomplete source pages merge into prior rows instead of erasing unseen records
   -> Failed partitions retain their prior records and are marked degraded
   -> Versioned, encrypted private S3 catalog
   -> FastAPI refreshes its in-memory catalog from S3 every five minutes
-  -> Global admission gate requires BOTH:
-       1. deterministic product fit score >= 8
-       2. at least one source-published, valid email OR phone contact
+  -> Conservative cross-source matching merges duplicate project views while retaining every source record
+  -> Global admission gate requires deterministic product fit score >= 8
+  -> Contact status is derived from source evidence:
+       1. published-contact when a valid source-published email or phone exists
+       2. research-needed when no usable contact was published
   -> React shows only admitted projects, companies, and document routes
   -> User signs in with a verified @tudelu.com Google account
   -> HttpOnly signed session identifies the user and their DynamoDB workspace
@@ -82,14 +85,19 @@ Exact versions are pinned in `frontend/package.json`, `backend/requirements*.txt
 
 ### Visibility admission gate
 
-`services/qualification.py` is the single product-wide visibility rule. A project is visible only when:
+`services/qualification.py` is the single product-wide visibility rule. A project is visible when:
 
-- `score_project(project).score >= 8`; and
-- the source record contains at least one valid published email or plausible published phone number.
+- `score_project(project).score >= 8`.
 
-This gate applies before search, exact-project lookup, dashboard cards, company aggregation, document aggregation, and outreach. Raw source counts remain visible only in coverage/inventory reporting so connector health stays auditable. Search metadata reports both raw snapshot count and qualified count.
+This gate applies before search, exact-project lookup, dashboard cards, company aggregation, and document aggregation. Visible records derive a `contactStatus` of `published-contact` or `research-needed`; the latter remain reviewable but cannot enter email or call workflows until a usable source-published contact exists. Raw source counts remain visible only in coverage/inventory reporting so connector health stays auditable. Search metadata reports both raw snapshot count and qualified count.
 
 The score is a prioritization signal, not a claim that the notice definitively contains a Tudelu product scope. Users must verify the official source.
+
+### Cross-source duplicate merger
+
+`services/project_merge.py` performs deterministic entity resolution before the catalog visibility gate. It considers only records from different source IDs and requires conservative evidence: a meaningful shared official identifier with corroborating title/location evidence, a matching normalized address with strong title-token overlap, or an exact substantive title with strong location/date evidence. Records with conflicting addresses are not merged through title similarity alone.
+
+A merged project retains a stable canonical ID plus `duplicateProjectIds`, `duplicateSourceCount`, and a `sourceRecords` list containing every contributing official record and URL. Documents and participants are unioned without inventing values, and exact lookup by any merged source ID resolves to the canonical project. Search metadata reports `mergedSourceProjectCount` and `duplicateRowsMerged`; coverage and source inventory continue to report raw rows so connector reconciliation remains honest.
 
 ### Product scoring and classification
 
@@ -102,7 +110,8 @@ Reusable profiles are returned by `GET /api/search-presets`. `direct_national` c
 ### Contact and email rules
 
 - Contacts must be published with the source record; BidAtlas does not manufacture or enrich a recipient.
-- A project may qualify with email, phone, or both. Email-capable projects offer marketing or employee outreach; phone-capable projects offer a direct `tel:` call action.
+- A product-qualified project remains visible without a contact and is labeled `Research needed`.
+- Email-capable projects offer marketing or employee outreach; phone-capable projects offer a direct `tel:` call action. Projects without either action remain research-only.
 - The server revalidates the recipient against the current project on save and send. A modified browser cannot turn the API into an arbitrary relay.
 - Every send requires a signed-in, verified `@tudelu.com` user and an explicit UI confirmation.
 - Marketing is the default sender mode and defaults to the connected `outreach@tudelugroup.com` Instantly account with the Alex Turner identity. The user can select any other account authorized by the connected Instantly token; the employee option uses Gmail `users/me` for the signed-in employee.
@@ -259,7 +268,8 @@ backend/app/
   services/marketing_outreach.py  Instantly delivery, cooldown, routing, reply normalization
   services/outreach.py      deterministic sender-aware draft generation
   services/ai_outreach.py   Anthropic prompt, response validation, fixed signature
-  services/qualification.py global contact + product-fit admission rule
+  services/qualification.py product-fit visibility + contact research status
+  services/project_merge.py conservative cross-source duplicate merger
   services/canopy.py        deterministic scoring, classification, and profiles
   services/catalog*.py      S3/local snapshot loading, search, aggregation
   services/partner_directory.py  sourced tri-state prospect contact filtering

@@ -12,7 +12,7 @@
     "dev:web": "npm --workspace @bidatlas/frontend run dev",
     "build": "npm --workspace @bidatlas/frontend run build",
     "lint": "npm --workspace @bidatlas/frontend run lint && npm --workspace @bidatlas/infra run typecheck && python -m ruff check backend/app backend/tests",
-    "test": "npm --workspace @bidatlas/frontend run test && python -m pytest backend/tests",
+    "test": "npm --workspace @bidatlas/frontend run test && npm --workspace @bidatlas/infra run test && python -m pytest backend/tests",
     "deploy:aws": "npm run build && npm --workspace @bidatlas/infra run deploy",
     "synth:aws": "npm run build && npm --workspace @bidatlas/infra run synth"
   },

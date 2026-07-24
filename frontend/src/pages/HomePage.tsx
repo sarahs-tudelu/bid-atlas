@@ -11,6 +11,8 @@ import type { DashboardResponse } from "../types";
 export function HomePage() {
   const { data, error, loading, refetch } = useApi<DashboardResponse>("/api/dashboard");
   const stageCounts = data?.inventory.stageCounts ?? {};
+  const researchNeededCount =
+    data?.inventory.contactStatusCounts?.["research-needed"] ?? 0;
   const earlyStage = (stageCounts.planning ?? 0) + (stageCounts.design ?? 0) + (stageCounts.permitting ?? 0);
 
   return (
@@ -46,7 +48,7 @@ export function HomePage() {
                 <span className="live-dot" /> AWS snapshot
               </div>
               <strong>{formatCount(data.inventory.totalProjects)}</strong>
-              <p>contactable product opportunities</p>
+              <p>qualified product opportunities</p>
               <dl>
                 <div>
                   <dt>Sources</dt>
@@ -83,7 +85,7 @@ export function HomePage() {
               <MetricCard
                 label="Open bidding records"
                 value={formatCount(stageCounts.bidding ?? 0)}
-                detail="Qualified with published contact"
+                detail={`${formatCount(researchNeededCount)} need contact research`}
               />
               <MetricCard label="Early-stage leads" value={formatCount(earlyStage)} detail="Planning through permitting" />
               <MetricCard

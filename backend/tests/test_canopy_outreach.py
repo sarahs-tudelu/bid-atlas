@@ -20,7 +20,9 @@ from backend.app.services.marketing_outreach import (
 )
 from backend.app.services.outreach import generate_outreach_draft
 from backend.app.services.qualification import (
+    contact_research_status,
     is_contactable_canopy_project,
+    is_product_project,
     published_contacts,
     published_phone_contacts,
 )
@@ -117,6 +119,29 @@ def test_product_classification_keeps_canopies_pergolas_and_partition_walls_dist
     assert [match["id"] for match in partitions] == ["partition-walls"]
 
 
+def test_compact_archive_records_reuse_validated_fit_and_product_evidence() -> None:
+    project = {
+        "title": "Compact imported record",
+        "canopyFit": {
+            "score": 18,
+            "band": "high",
+            "reasons": ["architectural canopy:title"],
+        },
+        "productMatches": [
+            {
+                "id": "canopies",
+                "label": "Canopies",
+                "score": 18,
+                "reasons": [],
+            }
+        ],
+    }
+
+    assert score_project(project)["score"] == 18
+    assert project_product_matches(project)[0]["id"] == "canopies"
+    assert is_product_project(project)
+
+
 def test_catalog_product_filter_returns_only_the_requested_product() -> None:
     projects = []
     for index, title in enumerate(
@@ -164,6 +189,50 @@ def test_catalog_product_filter_returns_only_the_requested_product() -> None:
         "Demountable partition wall renovation"
     ]
     assert response["projects"][0]["productTypes"] == ["partition-walls"]
+
+
+def test_catalog_keeps_product_fit_without_contact_and_marks_research_needed() -> None:
+    catalog = ProjectCatalog.from_snapshot(
+        {
+            "generatedAt": "2026-07-23T12:00:00Z",
+            "projects": [
+                {
+                    "id": "test:research",
+                    "sourceId": "test",
+                    "sourceRecordId": "research",
+                    "title": "Architectural canopy replacement",
+                    "summary": "Commercial building construction",
+                    "stage": "design",
+                    "state": "NJ",
+                    "sourceUrl": "https://example.gov/research",
+                    "documents": [],
+                    "participants": [],
+                },
+                {
+                    "id": "test:unqualified",
+                    "sourceId": "test",
+                    "sourceRecordId": "unqualified",
+                    "title": "Office supplies",
+                    "summary": "Printer paper",
+                    "stage": "bidding",
+                    "state": "NJ",
+                    "sourceUrl": "https://example.gov/unqualified",
+                    "documents": [],
+                    "participants": [{"email": "buyer@example.gov"}],
+                },
+            ],
+            "sources": [],
+            "coverage": {"states": [{"code": "NJ", "name": "New Jersey"}]},
+            "inventory": {},
+        },
+        {"sources": []},
+    )
+
+    assert [project["id"] for project in catalog.projects] == ["test:research"]
+    assert catalog.project("test:research")["contactStatus"] == "research-needed"
+    assert catalog.dashboard()["inventory"]["contactStatusCounts"] == {
+        "research-needed": 1
+    }
 
 
 def test_search_prioritizes_projects_with_public_drawings() -> None:
@@ -285,6 +354,18 @@ def test_phone_only_project_is_contactable_without_becoming_emailable() -> None:
     assert published_contacts(project) == []
     assert published_phone_contacts(project)[0]["phone"] == "973-555-0100"
     assert is_contactable_canopy_project(project)
+
+
+def test_product_project_without_contact_is_visible_for_research() -> None:
+    project = {
+        "title": "Architectural metal canopy replacement",
+        "summary": "Replace covered entrance canopy",
+        "participants": [],
+    }
+
+    assert is_product_project(project)
+    assert not is_contactable_canopy_project(project)
+    assert contact_research_status(project) == "research-needed"
 
 
 def test_search_presets_and_profile_results_include_fit_evidence() -> None:
@@ -451,7 +532,11 @@ def test_employee_sender_remains_available_through_logged_in_gmail(monkeypatch) 
 
 def test_outreach_rejects_recipient_not_published_by_source(monkeypatch) -> None:
     catalog = get_catalog()
-    project = catalog.projects[0]
+    project = next(
+        project
+        for project in catalog.projects
+        if any(participant.get("email") for participant in project.get("participants", []))
+    )
     store = get_workspace_store()
     store.delete(TEST_USER["email"], f"outreach#{project['id']}")
     store.put(TEST_USER["email"], "google#account", {"email": TEST_USER["email"], "accessToken": "test"})
